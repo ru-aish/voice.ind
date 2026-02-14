@@ -311,6 +311,14 @@ export class GdmLiveAudio extends LitElement {
     this.outputNode.connect(this.outputAudioContext.destination);
   }
 
+  private resolveTtsLanguage(sttLanguage: string): string {
+    const normalized = String(sttLanguage || '').trim().toLowerCase();
+    if (normalized === 'gu' || normalized === 'gu-in') return 'hi-IN';
+    if (normalized === 'en' || normalized === 'en-in') return 'en-IN';
+    if (normalized === 'hi' || normalized === 'hi-in') return 'hi-IN';
+    return 'hi-IN';
+  }
+
   private splitTextIntoChunks(text: string): string[] {
     const sentenceRegex = /[^.!?]*[.!?]+/g;
     const sentences: string[] = [];
@@ -552,6 +560,7 @@ export class GdmLiveAudio extends LitElement {
 
     this.sendConfig({
       language: this.currentSettings.languageCode,
+      ttsLanguage: this.resolveTtsLanguage(this.currentSettings.languageCode),
       speaker: this.currentSettings.speaker,
       provider: this.currentSettings.provider,
       groqModel: this.currentSettings.groqModel,
@@ -1068,6 +1077,7 @@ export class GdmLiveAudio extends LitElement {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.sendConfig({
           language: this.currentSettings.languageCode,
+          ttsLanguage: this.resolveTtsLanguage(this.currentSettings.languageCode),
           speaker: this.currentSettings.speaker,
           provider: this.currentSettings.provider,
           groqModel: this.currentSettings.groqModel,
