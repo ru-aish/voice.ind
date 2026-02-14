@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: voice-ai-server
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: PORT
+        value: 8081
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: CEREBRAS_API_KEY
+        sync: false
+      - key: DEFAULT_PROVIDER
+        value: groq
+      - key: SARVAM_STT_LANGUAGE_CODE
+        value: hi-IN
+      - key: TTS_TARGET_LANGUAGE_CODE
+        value: hi-IN
+      - key: TTS_SPEAKER
+        value: shubh
+      - key: VOICE_SERVER_LOG_LEVEL
+        value: info

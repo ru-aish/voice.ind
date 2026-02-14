@@ -1,0 +1,1470 @@
+const { EventEmitter } = require('events');
+
+const { SarvamSttClient } = require('../stt/sarvam-stt-client');
+const {
+  extractTranscript,
+  extractTranscriptIsFinal,
+  extractVadSignalType,
+  mergeTranscriptText,
+  normalizeTranscriptText,
+  sanitizePromptTranscript,
+  summarizeSttMessage,
+} = require('../stt/transcript-processor');
+const { VadHandler } = require('../stt/vad-handler');
+
+const { GroqProvider } = require('../llm/groq-provider');
+const { CerebrasProvider } = require('../llm/cerebras-provider');
+const { countTokensApprox } = require('../llm/types');
+
+const { SarvamTtsClient } = require('../tts/sarvam-tts-client');
+const { extractLineChunks } = require('../tts/audio-chunker');
+
+const { BargeInHandler, mergePrompts } = require('./barge-in-handler');
+const { LatencyTracker } = require('./latency-tracker');
+const { VAD_SIGNALS } = require('../../config/constants');
+
+function nowIso(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) return null;
+  return new Date(ms).toISOString();
+}
+
+function isAbortLikeError(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return msg.includes('abort');
+}
+
+function countWords(text) {
+  return String(text || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function mergeText(lhs, rhs) {
+  const left = String(lhs || '').trim();
+  const right = String(rhs || '').trim();
+  if (!left) return right;
+  if (!right) return left;
+  return `${left} ${right}`;
+}
+
+function languageLabel(languageCode) {
+  const normalized = String(languageCode || '').trim().toLowerCase();
+  if (normalized === 'gu-in' || normalized === 'gu') return 'Gujarati (Gujarati script)';
+  if (normalized === 'hi-in' || normalized === 'hi') return 'Hindi (Devanagari script)';
+  if (normalized === 'en-in' || normalized === 'en') return 'English (Latin script)';
+  return null;
+}
+
+function languageScriptRegex(languageCode) {
+  const normalized = String(languageCode || '').trim().toLowerCase();
+  if (normalized === 'gu-in' || normalized === 'gu') return /[\u0A80-\u0AFF]/u;
+  if (normalized === 'hi-in' || normalized === 'hi') return /[\u0900-\u097F]/u;
+  if (normalized === 'en-in' || normalized === 'en') return /[A-Za-z]/;
+  return null;
+}
+
+function hasRequiredScriptChar(text, languageCode) {
+  const content = String(text || '');
+  if (!content) return false;
+  const re = languageScriptRegex(languageCode);
+  if (!re) return true;
+  if (re.test(content)) return true;
+  if (/\d/.test(content)) return true;
+  return false;
+}
+
+function buildLanguageConstraintInstruction(languageCode) {
+  const label = languageLabel(languageCode);
+  if (!label) return null;
+  return `Respond only in ${label}. Do not switch to any other language/script.`;
+}
+
+function isSarvamAllowedLanguageError(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return (
+    msg.includes('allowed languages') ||
+    msg.includes('text must contain at least one character') ||
+    /code"?\s*:\s*422/.test(msg)
+  );
+}
+
+function isAnyTtsError(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return msg.includes('tts error') || msg.includes('previous tts request still in progress');
+}
+
+function previewText(text, maxChars = 180) {
+  const content = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!content) return '';
+  const limit = Math.max(20, Number(maxChars) || 180);
+  if (content.length <= limit) return content;
+  return `${content.slice(0, limit)}...`;
+}
+
+function isCommonTtsChar(ch) {
+  return /[\s0-9.,!?;:'"()\-_/\\@#$%^&*+=<>{}\[\]|`~…]/u.test(ch);
+}
+
+function isLanguageScriptChar(ch, languageCode) {
+  const normalized = String(languageCode || '').trim().toLowerCase();
+  if (normalized === 'gu-in' || normalized === 'gu') return /\p{Script=Gujarati}/u.test(ch);
+  if (normalized === 'hi-in' || normalized === 'hi') return /\p{Script=Devanagari}/u.test(ch);
+  if (normalized === 'en-in' || normalized === 'en') return /[A-Za-z]/.test(ch);
+  return true;
+}
+
+function sanitizeTextForTtsLanguage(text, languageCode) {
+  const chars = Array.from(String(text || ''));
+  const kept = [];
+  for (const ch of chars) {
+    if (isCommonTtsChar(ch) || isLanguageScriptChar(ch, languageCode)) {
+      kept.push(ch);
+    }
+  }
+  return kept.join('').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeForTokenCompare(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenOverlapRatio(lhs, rhs) {
+  const leftTokens = normalizeForTokenCompare(lhs).split(' ').filter(Boolean);
+  const rightTokens = new Set(normalizeForTokenCompare(rhs).split(' ').filter(Boolean));
+  if (leftTokens.length === 0 || rightTokens.size === 0) return 0;
+  let hits = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) hits += 1;
+  }
+  return hits / leftTokens.length;
+}
+
+class VoicePipeline extends EventEmitter {
+  constructor({ sessionId, config }) {
+    super();
+    this.sessionId = sessionId;
+    this.config = config;
+
+    this.activeProvider = config.llm.provider;
+
+    this.vad = new VadHandler();
+    this.bargeIn = new BargeInHandler();
+
+    this.sttClient = null;
+    this.ttsClient = null;
+    this.providers = new Map();
+
+    this.sessionStartedAtMs = null;
+
+    this.lastTranscriptText = '';
+    this.lastTranscriptSeq = 0;
+    this.activeSegmentTranscript = '';
+    this.pendingEndedSegment = null;
+    this.lateTranscriptFallback = null;
+
+    this.modelRequestCounter = 0;
+    this.liveDispatchedSegments = new Set();
+    this.liveTranscriptState = {
+      segmentIndex: null,
+      lastText: '',
+      lastSentAtMs: 0,
+    };
+    this.conversationHistory = [];
+    this.turnStates = new Map();
+    this.turnCounter = 0;
+
+    this.stopped = false;
+  }
+
+  async start() {
+    this.sessionStartedAtMs = Date.now();
+    await this.#connectSttClient();
+
+    this.emit('ready', {
+      sessionId: this.sessionId,
+      startedAtMs: this.sessionStartedAtMs,
+      startedAtIso: nowIso(this.sessionStartedAtMs),
+      runtimeTag: 'voice-ai-2026-02-14-r5',
+      provider: this.activeProvider,
+      sttLanguage: this.config.stt.languageCode,
+      sampleRate: this.config.stt.sampleRate,
+    });
+  }
+
+  async stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+
+    if (this.pendingEndedSegment?.timer) {
+      clearTimeout(this.pendingEndedSegment.timer);
+    }
+    this.pendingEndedSegment = null;
+
+    this.abortCurrent('session_stopped');
+
+    const forcedSegment = this.vad.forceEnd(Date.now());
+    if (forcedSegment) {
+      this.emit('vad', {
+        signal: 'FORCED_END',
+        segmentIndex: forcedSegment.segmentIndex,
+        durationMs: forcedSegment.durationMs,
+      });
+    }
+
+    if (this.sttClient) {
+      await this.sttClient.close();
+      this.sttClient = null;
+    }
+
+    if (this.ttsClient) {
+      await this.ttsClient.close();
+      this.ttsClient = null;
+    }
+  }
+
+  async applyConfig(partial) {
+    const next = partial || {};
+
+    let restartStt = false;
+    let resetTts = false;
+
+    if (next.provider && ['groq', 'cerebras'].includes(String(next.provider).toLowerCase())) {
+      this.activeProvider = String(next.provider).toLowerCase();
+    }
+
+    if (next.language && String(next.language).trim()) {
+      const lang = String(next.language).trim();
+      if (lang !== this.config.stt.languageCode) {
+        this.config.stt.languageCode = lang;
+        restartStt = true;
+      }
+      if (lang !== this.config.tts.languageCode) {
+        this.config.tts.languageCode = lang;
+        resetTts = true;
+      }
+    }
+
+    if (next.sttLanguage && String(next.sttLanguage).trim()) {
+      const lang = String(next.sttLanguage).trim();
+      if (lang !== this.config.stt.languageCode) {
+        this.config.stt.languageCode = lang;
+        restartStt = true;
+      }
+    }
+
+    if (next.ttsLanguage && String(next.ttsLanguage).trim()) {
+      const lang = String(next.ttsLanguage).trim();
+      if (lang !== this.config.tts.languageCode) {
+        this.config.tts.languageCode = lang;
+        resetTts = true;
+      }
+    }
+
+    if (restartStt) {
+      await this.#connectSttClient(true);
+    }
+
+    if (resetTts && this.ttsClient) {
+      await this.ttsClient.close();
+      this.ttsClient = null;
+    }
+
+    if (next.clearContext === true) {
+      this.#clearContext();
+    }
+
+    return {
+      provider: this.activeProvider,
+      sttLanguage: this.config.stt.languageCode,
+      ttsLanguage: this.config.tts.languageCode,
+      sttModel: this.config.stt.model,
+      ttsSpeaker: this.config.tts.speaker,
+      contextTurns: this.#currentContextTurns(),
+    };
+  }
+
+  handleAudioChunk(audioBase64OrBuffer) {
+    if (!this.sttClient) {
+      throw new Error('STT client is not initialized');
+    }
+
+    if (Buffer.isBuffer(audioBase64OrBuffer) || audioBase64OrBuffer instanceof Uint8Array) {
+      this.sttClient.sendAudioBuffer(audioBase64OrBuffer);
+      return;
+    }
+
+    const audioBase64 = String(audioBase64OrBuffer || '').trim();
+    if (!audioBase64) return;
+    this.sttClient.sendAudioBase64(audioBase64);
+  }
+
+  handleTextInput(text) {
+    const prompt = String(text || '').trim();
+    if (!prompt) return;
+
+    if (this.bargeIn.inFlight) {
+      this.bargeIn.queueLatestPrompt(prompt);
+      const dropped = this.#markInFlightDropped('text_input_while_provider_inflight');
+      if (dropped) {
+        this.emit('metrics', {
+          type: 'barge_in',
+          requestId: dropped.requestId,
+          provider: dropped.provider,
+          reason: dropped.reason,
+        });
+      }
+      return;
+    }
+
+    this.#dispatchTurn(prompt, Date.now(), 'text_input');
+  }
+
+  abortCurrent(reason = 'client_abort') {
+    const dropped = this.#markInFlightDropped(reason);
+    if (dropped) {
+      this.emit('metrics', {
+        type: 'barge_in',
+        requestId: dropped.requestId,
+        provider: dropped.provider,
+        reason: dropped.reason,
+      });
+    }
+  }
+
+  async #connectSttClient(forceReconnect = false) {
+    if (forceReconnect && this.sttClient) {
+      await this.sttClient.close();
+      this.sttClient = null;
+    }
+
+    if (this.sttClient) return;
+
+    this.sttClient = new SarvamSttClient({
+      apiKey: this.config.keys.sarvamApiKey,
+      model: this.config.stt.model,
+      languageCode: this.config.stt.languageCode,
+      sampleRate: this.config.stt.sampleRate,
+      inputAudioCodec: this.config.stt.inputAudioCodec,
+      encoding: this.config.stt.encoding,
+      highVadSensitivity: this.config.stt.highVadSensitivity,
+      vadSignals: this.config.stt.vadSignals,
+      flushSignal: this.config.stt.flushSignal,
+    });
+
+    this.sttClient.on('first_chunk_sent', ({ atMs }) => {
+      this.emit('metrics', {
+        type: 'stt_first_chunk_sent',
+        atMs,
+        atIso: nowIso(atMs),
+      });
+    });
+
+    this.sttClient.on('first_message', (metrics) => {
+      this.emit('metrics', {
+        type: 'stt_first_message_latency',
+        ...metrics,
+        atIso: nowIso(metrics.atMs),
+      });
+    });
+
+    this.sttClient.on('message', (response) => {
+      this.#handleSttMessage(response);
+    });
+
+    this.sttClient.on('error', (err) => {
+      this.emit('error', { error: `stt_socket_error: ${err?.message || err}` });
+    });
+
+    this.sttClient.on('close', (event) => {
+      this.emit('metrics', {
+        type: 'stt_socket_closed',
+        code: event?.code ?? null,
+      });
+    });
+
+    await this.sttClient.connect();
+  }
+
+  async #ensureTtsClient() {
+    if (!this.ttsClient || this.ttsClient.aborted) {
+      this.ttsClient = new SarvamTtsClient({
+        apiKey: this.config.keys.sarvamApiKey,
+        wsUrl: this.config.tts.wsUrl,
+        speaker: this.config.tts.speaker,
+        languageCode: this.config.tts.languageCode,
+        pace: this.config.tts.pace,
+        minBufferSize: this.config.tts.minBufferSize,
+        maxChunkLength: this.config.tts.maxChunkLength,
+        outputCodec: this.config.tts.outputCodec,
+        flushDelayMs: this.config.tts.flushDelayMs,
+        sampleRate: this.config.tts.sampleRate,
+      });
+
+      this.ttsClient.on('error', (err) => {
+        this.emit('error', { error: `tts_socket_error: ${err?.message || err}` });
+      });
+    }
+
+    await this.ttsClient.connect();
+    return this.ttsClient;
+  }
+
+  #getProvider(providerName) {
+    const normalized = providerName === 'cerebras' ? 'cerebras' : 'groq';
+    if (this.providers.has(normalized)) {
+      return this.providers.get(normalized);
+    }
+
+    let provider;
+    if (normalized === 'cerebras') {
+      provider = new CerebrasProvider({
+        apiKey: this.config.keys.cerebrasApiKey,
+        model: this.config.cerebras.model,
+        temperature: this.config.cerebras.temperature,
+        maxCompletionTokens: this.config.cerebras.maxCompletionTokens,
+        topP: this.config.cerebras.topP,
+        reasoningEffort: this.config.cerebras.reasoningEffort,
+        stop: this.config.cerebras.stop,
+        allowReasoningFallback: this.config.cerebras.allowReasoningFallback,
+        systemPrompt: this.config.cerebras.systemPrompt,
+      });
+    } else {
+      provider = new GroqProvider({
+        apiKey: this.config.keys.groqApiKey,
+        model: this.config.groq.model,
+        temperature: this.config.groq.temperature,
+        maxCompletionTokens: this.config.groq.maxCompletionTokens,
+        topP: this.config.groq.topP,
+        reasoningEffort: this.config.groq.reasoningEffort,
+        stop: this.config.groq.stop,
+        allowReasoningFallback: this.config.groq.allowReasoningFallback,
+        systemPrompt: this.config.groq.systemPrompt,
+      });
+    }
+
+    this.providers.set(normalized, provider);
+    return provider;
+  }
+
+  #resetLiveTranscriptStateForSegment(segmentIndex) {
+    this.liveTranscriptState = {
+      segmentIndex,
+      lastText: '',
+      lastSentAtMs: 0,
+    };
+  }
+
+  #clearLateTranscriptFallback() {
+    this.lateTranscriptFallback = null;
+  }
+
+  #clearContext() {
+    this.conversationHistory = [];
+    this.turnStates.clear();
+    this.turnCounter = 0;
+    this.emit('metrics', {
+      type: 'context_cleared',
+    });
+  }
+
+  #currentContextTurns() {
+    const turnIds = new Set();
+    for (const msg of this.conversationHistory) {
+      if (msg?.turnId) turnIds.add(msg.turnId);
+    }
+    return turnIds.size;
+  }
+
+  #pruneContextHistory() {
+    const maxTurns = Math.max(0, Number(this.config.pipeline.contextMaxTurns || 0));
+    if (maxTurns > 0) {
+      const seen = new Set();
+      for (let i = this.conversationHistory.length - 1; i >= 0; i -= 1) {
+        const turnId = this.conversationHistory[i]?.turnId;
+        if (turnId) seen.add(turnId);
+        if (seen.size > maxTurns) {
+          const cutoffTurnId = turnId;
+          this.conversationHistory = this.conversationHistory.filter(
+            (msg) => msg.turnId !== cutoffTurnId
+          );
+          seen.delete(cutoffTurnId);
+        }
+      }
+    }
+
+    const maxChars = Math.max(0, Number(this.config.pipeline.contextMaxChars || 0));
+    if (maxChars > 0) {
+      let totalChars = this.conversationHistory.reduce(
+        (sum, msg) => sum + String(msg?.content || '').length,
+        0
+      );
+      while (totalChars > maxChars && this.conversationHistory.length > 2) {
+        const removed = this.conversationHistory.shift();
+        totalChars -= String(removed?.content || '').length;
+      }
+    }
+  }
+
+  #ensureUserHistory(turn) {
+    if (!turn || turn.historyUserIndex !== null) return;
+    const content = String(turn.userPrompt || '').trim();
+    if (!content) return;
+    this.conversationHistory.push({
+      role: 'user',
+      content,
+      turnId: turn.turnId,
+      requestId: turn.requestId,
+      interrupted: false,
+      timestampMs: Date.now(),
+    });
+    turn.historyUserIndex = this.conversationHistory.length - 1;
+    this.#pruneContextHistory();
+  }
+
+  #upsertAssistantHistory(turn, content, interrupted = false) {
+    if (!turn) return;
+    const text = String(content || '').trim();
+    if (!text) return;
+    if (turn.historyAssistantIndex === null) {
+      this.conversationHistory.push({
+        role: 'assistant',
+        content: text,
+        turnId: turn.turnId,
+        requestId: turn.requestId,
+        interrupted: !!interrupted,
+        timestampMs: Date.now(),
+      });
+      turn.historyAssistantIndex = this.conversationHistory.length - 1;
+      this.#pruneContextHistory();
+      return;
+    }
+    if (!this.conversationHistory[turn.historyAssistantIndex]) return;
+    this.conversationHistory[turn.historyAssistantIndex].content = text;
+    this.conversationHistory[turn.historyAssistantIndex].interrupted = !!interrupted;
+    this.conversationHistory[turn.historyAssistantIndex].timestampMs = Date.now();
+  }
+
+  #createTurnState(requestId, prompt) {
+    const turnState = {
+      turnId: ++this.turnCounter,
+      requestId,
+      userPrompt: String(prompt || '').trim(),
+      assistantGeneratedText: '',
+      assistantSpokenText: '',
+      status: 'running',
+      startedAtMs: Date.now(),
+      interruptedAtMs: null,
+      completedAtMs: null,
+      historyUserIndex: null,
+      historyAssistantIndex: null,
+    };
+    this.turnStates.set(requestId, turnState);
+    this.#ensureUserHistory(turnState);
+    return turnState;
+  }
+
+  #appendGeneratedForTurn(requestId, tokenText) {
+    const turn = this.turnStates.get(requestId);
+    if (!turn || turn.status !== 'running') return;
+    turn.assistantGeneratedText = mergeText(turn.assistantGeneratedText, tokenText);
+  }
+
+  #appendSpokenForTurn(requestId, text) {
+    const turn = this.turnStates.get(requestId);
+    if (!turn || turn.status !== 'running') return;
+    turn.assistantSpokenText = mergeText(turn.assistantSpokenText, text);
+  }
+
+  #finalizeCompletedTurn(requestId, assistantText) {
+    const turn = this.turnStates.get(requestId);
+    if (!turn || turn.status !== 'running') return;
+    turn.completedAtMs = Date.now();
+    turn.status = 'completed';
+    const finalAssistant = String(assistantText || '').trim() || String(turn.assistantGeneratedText || '').trim();
+    this.#ensureUserHistory(turn);
+    this.#upsertAssistantHistory(turn, finalAssistant, false);
+    this.turnStates.delete(requestId);
+  }
+
+  #finalizeInterruptedTurn(requestId, reason) {
+    const turn = this.turnStates.get(requestId);
+    if (!turn || turn.status !== 'running') return;
+    turn.status = 'interrupted';
+    turn.interruptedAtMs = Date.now();
+    const spokenPartial = String(turn.assistantSpokenText || '').trim();
+    this.#ensureUserHistory(turn);
+    if (spokenPartial) {
+      this.#upsertAssistantHistory(turn, spokenPartial, true);
+    }
+    this.emit('metrics', {
+      type: 'turn_interrupted_context_saved',
+      requestId,
+      reason,
+      hasSpokenPartial: Boolean(spokenPartial),
+      spokenPartialChars: spokenPartial.length,
+      contextTurns: this.#currentContextTurns(),
+    });
+    this.turnStates.delete(requestId);
+  }
+
+  #buildContextMessages(prompt) {
+    const messages = [];
+    const providerName = this.activeProvider;
+    const baseSystemPrompt =
+      providerName === 'cerebras'
+        ? this.config.cerebras.systemPrompt
+        : this.config.groq.systemPrompt;
+    const languageInstruction = buildLanguageConstraintInstruction(this.config.tts.languageCode);
+
+    const systemParts = [];
+    if (baseSystemPrompt) systemParts.push(String(baseSystemPrompt).trim());
+    if (languageInstruction) systemParts.push(languageInstruction);
+    const systemPrompt = systemParts.filter(Boolean).join('\n\n');
+
+    if (systemPrompt) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+
+    if (this.config.pipeline.contextEnabled) {
+      for (const msg of this.conversationHistory) {
+        if (!msg?.role || !msg?.content) continue;
+        messages.push({ role: msg.role, content: msg.content });
+      }
+    }
+
+    messages.push({ role: 'user', content: prompt });
+    return messages;
+  }
+
+  #markInFlightDropped(reason) {
+    const dropped = this.bargeIn.dropInFlight(reason);
+    if (!dropped) return null;
+    this.#finalizeInterruptedTurn(dropped.requestId, reason);
+
+    if (this.ttsClient) {
+      try {
+        this.ttsClient.abort('Turn aborted');
+      } catch {}
+      this.ttsClient = null;
+    }
+
+    return dropped;
+  }
+
+  #isLikelyAssistantEcho(transcript) {
+    if (!this.config.pipeline.echoGuardEnabled) return false;
+    const sample = String(transcript || '').trim();
+    if (!sample) return false;
+    if (sample.length < this.config.pipeline.echoGuardMinChars) return false;
+    if (!this.bargeIn.inFlight?.requestId) return false;
+
+    const inFlightTurn = this.turnStates.get(this.bargeIn.inFlight.requestId);
+    if (!inFlightTurn) return false;
+
+    const assistantText = mergeText(
+      inFlightTurn.assistantSpokenText,
+      inFlightTurn.assistantGeneratedText
+    );
+    if (!assistantText) return false;
+
+    const normAssistant = normalizeForTokenCompare(assistantText);
+    const normSample = normalizeForTokenCompare(sample);
+    if (!normAssistant || !normSample) return false;
+
+    if (normAssistant.includes(normSample)) return true;
+    const overlap = tokenOverlapRatio(normSample, normAssistant);
+    return overlap >= Number(this.config.pipeline.echoGuardTokenOverlap || 0.8);
+  }
+
+  #finalizeSegmentPrompt(segmentIndex, endedAtMs, rawTranscript, dispatchReason) {
+    const transcript = sanitizePromptTranscript(
+      rawTranscript,
+      this.config.pipeline.dedupRepeatedTranscript
+    );
+    if (!transcript) return false;
+    const transcriptWordCount = countWords(transcript);
+
+    const resolvedAtMs = Date.now();
+    this.emit('metrics', {
+      type: 'prompt_finalized',
+      segmentIndex,
+      promptChars: transcript.length,
+      promptFinalizedAtMs: resolvedAtMs,
+      promptFinalizedAtIso: nowIso(resolvedAtMs),
+      detectionEndToPromptReadyMs: Math.max(0, resolvedAtMs - endedAtMs),
+      dispatchReason,
+    });
+
+    this.#clearLateTranscriptFallback();
+
+    if (this.bargeIn.inFlight) {
+      if (this.#isLikelyAssistantEcho(transcript)) {
+        this.emit('metrics', {
+          type: 'skip_provider',
+          reason: 'likely_assistant_echo_while_inflight',
+          segmentIndex,
+          promptChars: transcript.length,
+        });
+        return false;
+      }
+
+      if (this.liveDispatchedSegments.has(segmentIndex)) {
+        this.bargeIn.queueLatestPrompt(transcript);
+      } else {
+        this.bargeIn.mergeQueuedPrompt(transcript);
+      }
+      const dropped = this.#markInFlightDropped('new_segment_closed_while_provider_inflight');
+      if (dropped) {
+        this.emit('metrics', {
+          type: 'barge_in',
+          requestId: dropped.requestId,
+          provider: dropped.provider,
+          reason: dropped.reason,
+          queuedPromptChars: this.bargeIn.queuedPrompt.length,
+        });
+      }
+      return true;
+    }
+
+    if (
+      transcript.length < this.config.pipeline.minPromptChars ||
+      transcriptWordCount < this.config.pipeline.minPromptWords
+    ) {
+      this.emit('metrics', {
+        type: 'skip_provider',
+        reason: 'empty_or_short_prompt',
+        promptChars: transcript.length,
+        promptWords: transcriptWordCount,
+        minPromptChars: this.config.pipeline.minPromptChars,
+        minPromptWords: this.config.pipeline.minPromptWords,
+        segmentIndex,
+      });
+      return false;
+    }
+
+    const promptToSend = mergePrompts(this.bargeIn.consumeQueuedPrompt(), transcript);
+    this.#dispatchTurn(promptToSend, endedAtMs, dispatchReason);
+    return true;
+  }
+
+  #resolveEndedSegmentTranscript(segmentTranscript) {
+    if (!this.pendingEndedSegment) return;
+
+    const transcript = sanitizePromptTranscript(
+      segmentTranscript,
+      this.config.pipeline.dedupRepeatedTranscript
+    );
+    const endedAtMs = this.pendingEndedSegment.endedAtMs;
+    const segmentIndex = this.pendingEndedSegment.segmentIndex;
+
+    if (this.pendingEndedSegment.timer) {
+      clearTimeout(this.pendingEndedSegment.timer);
+    }
+    this.pendingEndedSegment = null;
+
+    if (!transcript) {
+      this.lateTranscriptFallback = {
+        segmentIndex,
+        endedAtMs,
+        expiresAtMs: Date.now() + Math.max(0, this.config.pipeline.lateTranscriptMaxMs),
+      };
+      this.emit('metrics', {
+        type: 'waiting_late_transcript',
+        segmentIndex,
+        lateWindowMs: Math.max(0, this.config.pipeline.lateTranscriptMaxMs),
+      });
+      return;
+    }
+
+    if (
+      this.config.pipeline.skipEndAfterLiveDispatch &&
+      this.liveDispatchedSegments.has(segmentIndex)
+    ) {
+      this.liveDispatchedSegments.delete(segmentIndex);
+      this.emit('metrics', {
+        type: 'skip_provider',
+        reason: 'already_dispatched_live_transcript',
+        segmentIndex,
+      });
+      return;
+    }
+
+    this.#finalizeSegmentPrompt(segmentIndex, endedAtMs, transcript, 'vad_end_speech');
+  }
+
+  #maybeDispatchLiveTranscript(transcript) {
+    if (!this.config.pipeline.sendOnTranscript) return;
+    if (!this.vad.speechActive || !this.vad.activeSegment) return;
+
+    const text = String(transcript || '').trim();
+    if (!text || text.length < this.config.pipeline.sendOnTranscriptMinChars) return;
+    if (countWords(text) < this.config.pipeline.minPromptWords) return;
+
+    const segmentIndex = this.vad.activeSegment.segmentIndex;
+    if (this.liveTranscriptState.segmentIndex !== segmentIndex) {
+      this.#resetLiveTranscriptStateForSegment(segmentIndex);
+    }
+
+    if (text === this.liveTranscriptState.lastText) return;
+
+    const nowMs = Date.now();
+    if (nowMs - this.liveTranscriptState.lastSentAtMs < this.config.pipeline.sendOnTranscriptDebounceMs) {
+      return;
+    }
+
+    this.liveTranscriptState.lastText = text;
+    this.liveTranscriptState.lastSentAtMs = nowMs;
+    this.liveDispatchedSegments.add(segmentIndex);
+
+    if (this.bargeIn.inFlight) {
+      this.bargeIn.queueLatestPrompt(text);
+      const dropped = this.#markInFlightDropped('new_live_transcript_while_provider_inflight');
+      if (dropped) {
+        this.emit('metrics', {
+          type: 'barge_in',
+          requestId: dropped.requestId,
+          provider: dropped.provider,
+          reason: dropped.reason,
+          queuedPromptChars: this.bargeIn.queuedPrompt.length,
+          segmentIndex,
+        });
+      }
+      return;
+    }
+
+    this.#dispatchTurn(text, nowMs, 'live_transcript');
+  }
+
+  #schedulePendingSegmentCheck() {
+    if (!this.pendingEndedSegment) return;
+
+    const check = () => {
+      if (!this.pendingEndedSegment) return;
+
+      if (
+        this.pendingEndedSegment.finalSeen &&
+        this.pendingEndedSegment.accumulatedTranscript
+      ) {
+        this.#resolveEndedSegmentTranscript(this.pendingEndedSegment.accumulatedTranscript);
+        return;
+      }
+
+      const nowMs = Date.now();
+      const elapsedMs = nowMs - this.pendingEndedSegment.endedAtMs;
+      const hasAccumulated = !!this.pendingEndedSegment.accumulatedTranscript;
+      const sinceLastUpdateMs = this.pendingEndedSegment.lastTranscriptAtMs
+        ? nowMs - this.pendingEndedSegment.lastTranscriptAtMs
+        : Number.POSITIVE_INFINITY;
+
+      if (
+        hasAccumulated &&
+        elapsedMs >= this.config.pipeline.transcriptGraceMs &&
+        sinceLastUpdateMs >= this.config.pipeline.transcriptPollMs
+      ) {
+        this.#resolveEndedSegmentTranscript(this.pendingEndedSegment.accumulatedTranscript);
+        return;
+      }
+
+      if (
+        elapsedMs >=
+        Math.max(this.config.pipeline.transcriptGraceMs, this.config.pipeline.transcriptMaxWaitMs)
+      ) {
+        this.#resolveEndedSegmentTranscript(this.pendingEndedSegment.accumulatedTranscript || '');
+        return;
+      }
+
+      this.pendingEndedSegment.timer = setTimeout(
+        check,
+        Math.max(20, this.config.pipeline.transcriptPollMs)
+      );
+    };
+
+    if (this.pendingEndedSegment.timer) clearTimeout(this.pendingEndedSegment.timer);
+    this.pendingEndedSegment.timer = setTimeout(
+      check,
+      Math.max(20, this.config.pipeline.transcriptGraceMs)
+    );
+  }
+
+  #maybeDispatchQueuedTurn() {
+    if (this.bargeIn.inFlight || this.vad.speechActive) return;
+    if (!this.bargeIn.hasQueuedPrompt()) return;
+
+    const queued = this.bargeIn.consumeQueuedPrompt();
+    this.#dispatchTurn(queued, Date.now(), 'queued_after_barge_in');
+  }
+
+  #dispatchTurn(promptText, detectionEndedAtMs, reason) {
+    const prompt = String(promptText || '').trim();
+    const promptWordCount = countWords(prompt);
+    if (
+      !prompt ||
+      prompt.length < this.config.pipeline.minPromptChars ||
+      promptWordCount < this.config.pipeline.minPromptWords
+    ) {
+      this.emit('metrics', {
+        type: 'skip_provider',
+        reason: 'empty_or_short_prompt',
+        promptChars: prompt.length,
+        promptWords: promptWordCount,
+        minPromptWords: this.config.pipeline.minPromptWords,
+      });
+      return;
+    }
+
+    const requestId = ++this.modelRequestCounter;
+    const provider = this.activeProvider;
+    const sendAtMs = Date.now();
+    const abortController = new AbortController();
+
+    this.bargeIn.setInFlight({
+      requestId,
+      provider,
+      detectionEndedAtMs,
+      sendAtMs,
+      promptChars: prompt.length,
+      abortController,
+    });
+    this.#createTurnState(requestId, prompt);
+
+    const detectionEndToProviderSendMs =
+      typeof detectionEndedAtMs === 'number' ? Math.max(0, sendAtMs - detectionEndedAtMs) : null;
+
+    this.emit('metrics', {
+      type: 'provider_dispatch',
+      requestId,
+      provider,
+      reason,
+      promptChars: prompt.length,
+      promptEndedAtMs: detectionEndedAtMs,
+      promptEndedAtIso: nowIso(detectionEndedAtMs),
+      providerSendAtMs: sendAtMs,
+      providerSendAtIso: nowIso(sendAtMs),
+      detectionEndToProviderSendMs,
+    });
+
+    this.#runProviderTurn(prompt, provider, requestId, detectionEndedAtMs, abortController.signal)
+      .then((summary) => {
+        this.bargeIn.markSettled(requestId);
+
+        const wasDropped = this.bargeIn.consumeDropped(requestId);
+        if (wasDropped) {
+          this.emit('metrics', {
+            type: 'provider_discarded',
+            requestId,
+            provider,
+          });
+          return;
+        }
+
+        this.#finalizeCompletedTurn(requestId, summary.generatedText);
+
+        this.emit('metrics', {
+          type: 'provider_result',
+          ...summary,
+          contextTurns: this.#currentContextTurns(),
+        });
+      })
+      .catch((err) => {
+        this.bargeIn.markSettled(requestId);
+
+        const wasDropped = this.bargeIn.consumeDropped(requestId);
+        if (wasDropped || isAbortLikeError(err)) {
+          this.#finalizeInterruptedTurn(requestId, 'provider_aborted');
+          this.emit('metrics', {
+            type: 'provider_aborted',
+            requestId,
+            provider,
+          });
+          return;
+        }
+
+        if (isSarvamAllowedLanguageError(err) || isAnyTtsError(err)) {
+          const currentTurn = this.turnStates.get(requestId);
+          this.#finalizeCompletedTurn(
+            requestId,
+            String(currentTurn?.assistantGeneratedText || '').trim()
+          );
+          this.emit('metrics', {
+            type: 'skip_tts_segment',
+            requestId,
+            provider,
+            reason: isSarvamAllowedLanguageError(err)
+              ? 'sarvam_allowed_language_error_top_level'
+              : 'tts_error_top_level',
+            ttsLanguage: this.config.tts.languageCode,
+            textPreview: previewText(String(err?.message || err || '')),
+          });
+          return;
+        }
+
+        this.emit('error', {
+          error: `provider_error request=${requestId} provider=${provider} message=${err?.message || err}`,
+        });
+      })
+      .finally(() => {
+        this.#maybeDispatchQueuedTurn();
+      });
+  }
+
+  async #runProviderTurn(prompt, providerName, requestId, detectionEndedAtMs, abortSignal) {
+    const provider = this.#getProvider(providerName);
+    const tts = await this.#ensureTtsClient();
+
+    const tracker = new LatencyTracker(providerName, requestId, prompt, detectionEndedAtMs);
+
+    let bufferedText = '';
+    let ttsDeferredPrefix = '';
+    let segmentIndex = 0;
+    let flushTimer = null;
+    let flushQueue = Promise.resolve();
+    let streamPreviewBuffer = '';
+    let streamPreviewCount = 0;
+
+    const streamDebugEnabled = Boolean(this.config.pipeline.streamDebug);
+    const streamDebugMaxPreviews = Math.max(
+      0,
+      Number(this.config.pipeline.streamDebugMaxPreviews || 0)
+    );
+    const streamDebugPreviewChars = Math.max(
+      40,
+      Number(this.config.pipeline.streamDebugPreviewChars || 220)
+    );
+
+    const emitStreamPreview = (text, reason) => {
+      if (!streamDebugEnabled || streamPreviewCount >= streamDebugMaxPreviews) return;
+      const value = String(text || '').trim();
+      if (!value) return;
+      streamPreviewCount += 1;
+      this.emit('metrics', {
+        type: 'provider_stream_preview',
+        requestId,
+        provider: providerName,
+        previewIndex: streamPreviewCount,
+        reason,
+        chars: value.length,
+        text: previewText(value, streamDebugPreviewChars),
+      });
+    };
+
+    const flushStreamPreview = (force = false) => {
+      if (!streamDebugEnabled || streamPreviewCount >= streamDebugMaxPreviews) return;
+      while (streamPreviewCount < streamDebugMaxPreviews) {
+        const idx = streamPreviewBuffer.search(/[.!?।॥\n]/u);
+        if (idx >= 0) {
+          const sentence = streamPreviewBuffer.slice(0, idx + 1).trim();
+          streamPreviewBuffer = streamPreviewBuffer.slice(idx + 1);
+          if (sentence) emitStreamPreview(sentence, 'sentence_boundary');
+          continue;
+        }
+        if (force) {
+          const remaining = streamPreviewBuffer.trim();
+          streamPreviewBuffer = '';
+          if (remaining) emitStreamPreview(remaining, 'stream_end_partial');
+        }
+        break;
+      }
+    };
+
+    const throwIfAborted = () => {
+      if (abortSignal?.aborted) {
+        throw new Error('Turn aborted');
+      }
+    };
+
+    const flushSegment = async (text, reason) => {
+      throwIfAborted();
+      const segmentText = String(text || '').trim();
+      if (!segmentText) return;
+
+      const mergedText = mergeText(ttsDeferredPrefix, segmentText);
+      if (!mergedText) return;
+
+      const contentPrepared = this.config.pipeline.ttsSanitize
+        ? sanitizeTextForTtsLanguage(mergedText, this.config.tts.languageCode)
+        : mergedText;
+      if (!contentPrepared) {
+        ttsDeferredPrefix = '';
+        this.emit('metrics', {
+          type: 'skip_tts_segment',
+          requestId,
+          provider: providerName,
+          reason: 'empty_after_tts_sanitize',
+          ttsLanguage: this.config.tts.languageCode,
+          textChars: mergedText.length,
+          textPreview: previewText(mergedText),
+        });
+        return;
+      }
+
+      if (contentPrepared !== mergedText) {
+        this.emit('metrics', {
+          type: 'tts_text_sanitized',
+          requestId,
+          provider: providerName,
+          ttsLanguage: this.config.tts.languageCode,
+          originalChars: mergedText.length,
+          sanitizedChars: contentPrepared.length,
+          originalPreview: previewText(mergedText),
+          sanitizedPreview: previewText(contentPrepared),
+        });
+      }
+
+      if (!hasRequiredScriptChar(contentPrepared, this.config.tts.languageCode)) {
+        ttsDeferredPrefix = contentPrepared;
+        this.emit('metrics', {
+          type: 'skip_tts_segment',
+          requestId,
+          provider: providerName,
+          reason: 'missing_required_language_char',
+          ttsLanguage: this.config.tts.languageCode,
+          textChars: contentPrepared.length,
+          textPreview: previewText(contentPrepared),
+        });
+        return;
+      }
+
+      ttsDeferredPrefix = '';
+      const content = contentPrepared;
+
+      segmentIndex += 1;
+      const segStartMs = Date.now();
+      this.#appendSpokenForTurn(requestId, content);
+
+      let ttsResult;
+      try {
+        ttsResult = await tts.speakText(content, {
+          onAudioChunk: ({ base64, atMs }) => {
+            this.emit('audio', {
+              requestId,
+              provider: providerName,
+              segmentIndex,
+              audioBase64: base64,
+              atMs,
+              atIso: nowIso(atMs),
+            });
+          },
+        });
+      } catch (err) {
+        if (isSarvamAllowedLanguageError(err) || isAnyTtsError(err)) {
+          this.emit('metrics', {
+            type: 'skip_tts_segment',
+            requestId,
+            provider: providerName,
+            reason: isSarvamAllowedLanguageError(err)
+              ? 'sarvam_allowed_language_error'
+              : 'tts_error_non_fatal',
+            ttsLanguage: this.config.tts.languageCode,
+            textChars: content.length,
+            textPreview: previewText(content),
+            errorPreview: previewText(String(err?.message || err || '')),
+          });
+          return;
+        }
+        throw err;
+      }
+
+      throwIfAborted();
+
+      const segment = {
+        index: segmentIndex,
+        reason,
+        text: content,
+        textChars: content.length,
+        sentAtMs: ttsResult.sentAtMs,
+        sentAtIso: nowIso(ttsResult.sentAtMs),
+        firstChunkAtMs: ttsResult.firstAudioAtMs,
+        firstChunkAtIso: nowIso(ttsResult.firstAudioAtMs),
+        sendToFirstChunkMs: ttsResult.sendToFirstAudioMs,
+        totalTtsMs: ttsResult.totalTtsMs,
+        audioChunkCount: ttsResult.audioChunkCount,
+        audioBytes: ttsResult.audioBytes,
+        processingWallMs: Date.now() - segStartMs,
+      };
+
+      tracker.addSegment(segment);
+    };
+
+    const enqueueFlush = (text, reason) => {
+      if (abortSignal?.aborted) return flushQueue;
+      const content = String(text || '').trim();
+      if (!content) return flushQueue;
+      flushQueue = flushQueue.then(() => flushSegment(content, reason));
+      return flushQueue;
+    };
+
+    const drainBuffered = (reason) => {
+      const text = bufferedText;
+      bufferedText = '';
+      return enqueueFlush(text, reason);
+    };
+
+    const scheduleTimeoutFlush = () => {
+      if (abortSignal?.aborted) return;
+      if (flushTimer) clearTimeout(flushTimer);
+      flushTimer = setTimeout(() => {
+        drainBuffered('timeout').catch((err) => {
+          if (abortSignal?.aborted || isAbortLikeError(err)) return;
+          if (isSarvamAllowedLanguageError(err) || isAnyTtsError(err)) return;
+          this.emit('error', {
+            error: `flush_timeout_error request=${requestId} message=${err?.message || err}`,
+          });
+        });
+      }, this.config.bridge.flushTimeoutMs);
+    };
+
+    const contextMessages = this.#buildContextMessages(prompt);
+    this.emit('metrics', {
+      type: 'context_window',
+      requestId,
+      provider: providerName,
+      contextEnabled: this.config.pipeline.contextEnabled,
+      messages: contextMessages.length,
+      turns: this.#currentContextTurns(),
+      promptChars: String(prompt || '').length,
+    });
+
+    const providerMetrics = await provider.streamText({
+      prompt,
+      messages: contextMessages,
+      abortSignal,
+      onFirstToken: async ({ atMs, source }) => {
+        tracker.markFirstToken(atMs, source);
+      },
+      onToken: async (tokenText) => {
+        throwIfAborted();
+
+        tracker.addGeneratedText(tokenText);
+        tracker.addTokensApprox(countTokensApprox(tokenText));
+        this.#appendGeneratedForTurn(requestId, tokenText);
+        streamPreviewBuffer += tokenText;
+        flushStreamPreview(false);
+
+        bufferedText += tokenText;
+        const { chunks, remaining } = extractLineChunks(bufferedText, this.config.tts.maxTextChars);
+        bufferedText = remaining;
+
+        for (const ready of chunks) {
+          throwIfAborted();
+          await enqueueFlush(ready, 'line_or_limit');
+        }
+
+        scheduleTimeoutFlush();
+      },
+    });
+    tracker.setProviderFinishReason(providerMetrics.finishReason);
+
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+
+    if (bufferedText.trim()) {
+      await drainBuffered('stream_end');
+    }
+
+    await flushQueue;
+    flushStreamPreview(true);
+
+    if (ttsDeferredPrefix.trim()) {
+      this.emit('metrics', {
+        type: 'skip_tts_segment',
+        requestId,
+        provider: providerName,
+        reason: 'stream_ended_without_required_language_char',
+        ttsLanguage: this.config.tts.languageCode,
+        textChars: ttsDeferredPrefix.trim().length,
+        textPreview: previewText(ttsDeferredPrefix),
+      });
+      ttsDeferredPrefix = '';
+    }
+
+    if (providerMetrics.finishReason === 'length') {
+      this.emit('metrics', {
+        type: 'provider_truncated',
+        requestId,
+        provider: providerName,
+        finishReason: providerMetrics.finishReason,
+        configuredMaxTokens:
+          providerName === 'cerebras'
+            ? this.config.cerebras.maxCompletionTokens
+            : this.config.groq.maxCompletionTokens,
+      });
+    }
+
+    throwIfAborted();
+
+    return tracker.complete(providerMetrics.tpsApprox);
+  }
+
+  #handleSttMessage(response) {
+    this.emit('metrics', {
+      type: 'stt_message',
+      summary: summarizeSttMessage(response),
+    });
+
+    const transcript = extractTranscript(response);
+    const transcriptIsFinal = extractTranscriptIsFinal(response);
+    const transcriptNormalized = normalizeTranscriptText(transcript);
+
+    if (transcriptNormalized) {
+      if (transcriptNormalized.length < this.config.pipeline.minTranscriptChars) {
+        this.emit('metrics', {
+          type: 'skip_transcript',
+          reason: 'too_short',
+          transcriptChars: transcriptNormalized.length,
+          minChars: this.config.pipeline.minTranscriptChars,
+        });
+      } else {
+        this.lastTranscriptText = transcriptNormalized;
+        this.lastTranscriptSeq += 1;
+
+        if (this.vad.speechActive) {
+          this.activeSegmentTranscript = mergeTranscriptText(
+            this.activeSegmentTranscript,
+            transcriptNormalized
+          );
+        }
+
+        if (
+          this.bargeIn.inFlight &&
+          this.vad.speechActive &&
+          this.config.pipeline.abortOnTranscript &&
+          transcriptNormalized.length >= this.config.pipeline.abortOnTranscriptMinChars
+        ) {
+          const dropped = this.#markInFlightDropped('transcript_arrived_while_provider_inflight');
+          if (dropped) {
+            this.emit('metrics', {
+              type: 'barge_in',
+              requestId: dropped.requestId,
+              provider: dropped.provider,
+              reason: dropped.reason,
+            });
+          }
+        }
+
+        this.#maybeDispatchLiveTranscript(
+          this.activeSegmentTranscript || transcriptNormalized
+        );
+
+        if (this.pendingEndedSegment && this.lastTranscriptSeq > this.pendingEndedSegment.baseTranscriptSeq) {
+          this.pendingEndedSegment.accumulatedTranscript = mergeTranscriptText(
+            this.pendingEndedSegment.accumulatedTranscript,
+            transcriptNormalized
+          );
+          this.pendingEndedSegment.lastTranscriptAtMs = Date.now();
+          this.pendingEndedSegment.finalSeen = this.pendingEndedSegment.finalSeen || transcriptIsFinal;
+          if (this.pendingEndedSegment.finalSeen) {
+            this.#resolveEndedSegmentTranscript(this.pendingEndedSegment.accumulatedTranscript);
+          }
+        } else if (!this.vad.speechActive && !this.pendingEndedSegment && this.lateTranscriptFallback) {
+          if (Date.now() <= this.lateTranscriptFallback.expiresAtMs) {
+            const fallback = this.lateTranscriptFallback;
+            this.#clearLateTranscriptFallback();
+            this.#finalizeSegmentPrompt(
+              fallback.segmentIndex,
+              fallback.endedAtMs,
+              transcriptNormalized,
+              'late_transcript'
+            );
+          } else {
+            this.#clearLateTranscriptFallback();
+          }
+        }
+
+        this.emit('transcript', {
+          text: transcriptNormalized,
+          isFinal: transcriptIsFinal,
+          speechActive: this.vad.speechActive,
+          segmentIndex: this.vad.activeSegment?.segmentIndex || this.pendingEndedSegment?.segmentIndex || null,
+        });
+      }
+    }
+
+    const vadSignalType = extractVadSignalType(response);
+    if (vadSignalType === VAD_SIGNALS.START) {
+      if (this.bargeIn.inFlight && this.config.pipeline.abortOnStartSpeech) {
+        const dropped = this.#markInFlightDropped('speaker_started_again_while_provider_inflight');
+        if (dropped) {
+          this.emit('metrics', {
+            type: 'barge_in',
+            requestId: dropped.requestId,
+            provider: dropped.provider,
+            reason: dropped.reason,
+          });
+        }
+      }
+
+      this.#clearLateTranscriptFallback();
+
+      if (this.pendingEndedSegment) {
+        const pendingText = normalizeTranscriptText(
+          this.pendingEndedSegment.accumulatedTranscript || this.lastTranscriptText || ''
+        );
+
+        if (pendingText) {
+          this.#resolveEndedSegmentTranscript(pendingText);
+        } else {
+          if (this.pendingEndedSegment.timer) {
+            clearTimeout(this.pendingEndedSegment.timer);
+          }
+          this.emit('metrics', {
+            type: 'skip_provider',
+            reason: 'missing_transcript_before_new_speech',
+            segmentIndex: this.pendingEndedSegment.segmentIndex,
+          });
+          this.pendingEndedSegment = null;
+        }
+      }
+
+      const started = this.vad.onStart(Date.now(), this.lastTranscriptSeq);
+      this.#resetLiveTranscriptStateForSegment(started.segmentIndex);
+      this.activeSegmentTranscript = '';
+
+      this.emit('vad', {
+        signal: VAD_SIGNALS.START,
+        segmentIndex: started.segmentIndex,
+        startedAtMs: started.startedAtMs,
+      });
+      return;
+    }
+
+    if (vadSignalType === VAD_SIGNALS.END) {
+      const ended = this.vad.onEnd(Date.now(), this.lastTranscriptSeq);
+      const segmentTranscript = String(this.activeSegmentTranscript || '').trim();
+      this.activeSegmentTranscript = '';
+
+      this.emit('vad', {
+        signal: VAD_SIGNALS.END,
+        segmentIndex: ended.segmentIndex,
+        durationMs: ended.durationMs,
+        endedAtMs: ended.endedAtMs,
+      });
+
+      this.pendingEndedSegment = {
+        segmentIndex: ended.segmentIndex,
+        endedAtMs: ended.endedAtMs,
+        baseTranscriptSeq: ended.segmentStartTranscriptSeq,
+        accumulatedTranscript: normalizeTranscriptText(segmentTranscript),
+        lastTranscriptAtMs: segmentTranscript ? Date.now() : null,
+        finalSeen: false,
+        timer: null,
+      };
+
+      if (segmentTranscript) {
+        this.#resolveEndedSegmentTranscript(segmentTranscript);
+      } else {
+        this.#schedulePendingSegmentCheck();
+      }
+    }
+  }
+}
+
+module.exports = {
+  VoicePipeline,
+};

@@ -1,0 +1,23 @@
+{
+  "name": "voice-ai-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone websocket voice pipeline server (Sarvam STT + Groq/Cerebras + Sarvam TTS)",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node --check src/index.js",
+    "client:live": "node src/app/voice-client-live.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@cerebras/cerebras_cloud_sdk": "^1.64.1",
+    "dotenv": "^17.3.1",
+    "groq-sdk": "^0.37.0",
+    "sarvamai": "^1.1.4",
+    "ws": "^8.19.0"
+  }
+}
