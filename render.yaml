@@ -17,10 +17,25 @@ services:
       - key: DEFAULT_PROVIDER
         value: groq
       - key: SARVAM_STT_LANGUAGE_CODE
-        value: hi-IN
+        value: gu-IN
       - key: TTS_TARGET_LANGUAGE_CODE
-        value: hi-IN
+        value: gu-IN
       - key: TTS_SPEAKER
         value: shubh
       - key: VOICE_SERVER_LOG_LEVEL
         value: info
+
+  - type: web
+    name: voice-ai-frontend
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: cd frontend && npm install && npm run build
+    startCommand: cd frontend && npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: VOICE_SERVER_URL
+        value: wss://voice-ind.onrender.com/
+      - key: NEXT_PUBLIC_VOICE_SERVER_URL
+        value: wss://voice-ind.onrender.com/

@@ -16,6 +16,23 @@ function getArgValue(prefix) {
   return value || null;
 }
 
+function canonicalLanguageCode(languageCode) {
+  const normalized = String(languageCode || '').trim().toLowerCase();
+  if (normalized === 'gu' || normalized === 'gu-in') return 'gu-IN';
+  if (normalized === 'hi' || normalized === 'hi-in') return 'hi-IN';
+  if (normalized === 'en' || normalized === 'en-in') return 'en-IN';
+  return String(languageCode || '').trim();
+}
+
+function resolveClientTtsLanguage(sttLanguage) {
+  const explicit = getArgValue('--tts-language') || process.env.VOICE_CLIENT_TTS_LANGUAGE;
+  if (explicit && String(explicit).trim()) {
+    return canonicalLanguageCode(explicit);
+  }
+  const normalizedStt = canonicalLanguageCode(sttLanguage);
+  return normalizedStt || 'gu-IN';
+}
+
 const SERVER_PORT = Number(process.env.PORT || 8081);
 const SERVER_PATH = process.env.VOICE_SERVER_WS_PATH || '/';
 const WS_URL =
@@ -26,7 +43,8 @@ const SPEAKER_DEVICE = process.env.SPEAKER_DEVICE || 'pulse';
 const SAMPLE_RATE = Number(process.env.SARVAM_STT_SAMPLE_RATE || 16000);
 const TTS_SAMPLE_RATE = Number(process.env.TTS_SAMPLE_RATE || process.env.VOICE_TTS_SAMPLE_RATE || 24000);
 const PROVIDER = (getArgValue('--provider') || process.env.DEFAULT_PROVIDER || 'groq').toLowerCase();
-const LANGUAGE = getArgValue('--language') || process.env.SARVAM_STT_LANGUAGE_CODE || 'hi-IN';
+const LANGUAGE = getArgValue('--language') || process.env.SARVAM_STT_LANGUAGE_CODE || 'gu-IN';
+const TTS_LANGUAGE = resolveClientTtsLanguage(LANGUAGE);
 const VERBOSE = hasFlag('--verbose') || String(process.env.VOICE_CLIENT_VERBOSE || 'false') === 'true';
 const ENABLE_SPEAKER = !hasFlag('--no-speaker');
 const SPEAKER_RESTART_DELAY_MS = Number(process.env.VOICE_SPEAKER_RESTART_DELAY_MS || 50);
@@ -43,6 +61,7 @@ if (hasFlag('--help') || hasFlag('-h')) {
 Options:
   --provider=groq|cerebras
   --language=hi-IN|gu-IN|en-IN
+  --tts-language=hi-IN|en-IN|gu-IN
   --no-speaker
   --no-reconnect
   --verbose`);
@@ -202,7 +221,7 @@ function handleServerMessage(raw) {
 
   if (type === 'ready') {
     log(
-      `ready provider=${data.provider} stt_language=${data.sttLanguage} started_at=${data.startedAtIso} runtime_tag=${data.runtimeTag || 'n/a'}`
+      `ready provider=${data.provider} stt_language=${data.sttLanguage} tts_language=${data.ttsLanguage ?? 'n/a'} started_at=${data.startedAtIso} runtime_tag=${data.runtimeTag || 'n/a'}`
     );
     if (!streamStarted) {
       startSpeaker();
@@ -308,6 +327,18 @@ function handleServerMessage(raw) {
       );
       return;
     }
+    if (metricType === 'tts_language_fallback') {
+      log(
+        `tts_language_fallback source=${data.source ?? 'n/a'} requested=${data.requested ?? 'n/a'} applied=${data.applied ?? 'n/a'} reason=${data.reason ?? 'n/a'}`
+      );
+      return;
+    }
+    if (metricType === 'llm_config_updated') {
+      log(
+        `llm_config_updated provider=${data.provider ?? 'n/a'} groq_model=${data.groqModel ?? 'n/a'} cerebras_model=${data.cerebrasModel ?? 'n/a'}`
+      );
+      return;
+    }
     if (metricType === 'barge_in') {
       if (data.requestId) {
         droppedRequestIds.add(data.requestId);
@@ -389,7 +420,7 @@ function connect() {
   if (stopping) return;
 
   log(`connecting url=${WS_URL}`);
-  log(`config provider=${PROVIDER} language=${LANGUAGE} mic_device=${MIC_DEVICE} speaker_enabled=${ENABLE_SPEAKER} reconnect=${RECONNECT_ENABLED}`);
+  log(`config provider=${PROVIDER} language=${LANGUAGE} tts_language=${TTS_LANGUAGE} mic_device=${MIC_DEVICE} speaker_enabled=${ENABLE_SPEAKER} reconnect=${RECONNECT_ENABLED}`);
 
   ws = new WebSocket(WS_URL);
 
@@ -404,6 +435,7 @@ function connect() {
           config: {
             provider: PROVIDER,
             language: LANGUAGE,
+            ttsLanguage: TTS_LANGUAGE,
           },
         },
       })

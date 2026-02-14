@@ -5,10 +5,16 @@
 
 # Dependencies
 node_modules/
+frontend/node_modules/
 
 # Logs
 *.log
 npm-debug.log*
+
+# Build artifacts
+frontend/.next/
+frontend/out/
+frontend/tsconfig.tsbuildinfo
 
 # OS files
 .DS_Store
@@ -19,3 +25,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Local env and temp
+frontend/.env.local
+*.bak

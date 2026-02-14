@@ -56,6 +56,44 @@ function languageLabel(languageCode) {
   return null;
 }
 
+const SUPPORTED_TTS_LANGUAGE_CODES = new Set(['hi-in', 'en-in', 'gu-in']);
+const DEFAULT_TTS_FALLBACK_LANGUAGE = 'gu-IN';
+
+function canonicalLanguageCode(languageCode) {
+  const normalized = String(languageCode || '').trim().toLowerCase();
+  if (normalized === 'gu' || normalized === 'gu-in') return 'gu-IN';
+  if (normalized === 'hi' || normalized === 'hi-in') return 'hi-IN';
+  if (normalized === 'en' || normalized === 'en-in') return 'en-IN';
+  if (!normalized) return '';
+  return String(languageCode || '').trim();
+}
+
+function resolveTtsLanguageCode(requestedLanguageCode, currentTtsLanguageCode = '') {
+  const requested = canonicalLanguageCode(requestedLanguageCode);
+  if (SUPPORTED_TTS_LANGUAGE_CODES.has(requested.toLowerCase())) {
+    return {
+      languageCode: requested,
+      fallbackFrom: null,
+      reason: null,
+    };
+  }
+
+  const current = canonicalLanguageCode(currentTtsLanguageCode);
+  if (SUPPORTED_TTS_LANGUAGE_CODES.has(current.toLowerCase())) {
+    return {
+      languageCode: current,
+      fallbackFrom: requested || null,
+      reason: 'requested_tts_language_not_supported',
+    };
+  }
+
+  return {
+    languageCode: DEFAULT_TTS_FALLBACK_LANGUAGE,
+    fallbackFrom: requested || current || null,
+    reason: 'requested_and_current_tts_languages_not_supported',
+  };
+}
+
 function languageScriptRegex(languageCode) {
   const normalized = String(languageCode || '').trim().toLowerCase();
   if (normalized === 'gu-in' || normalized === 'gu') return /[\u0A80-\u0AFF]/u;
@@ -149,8 +187,24 @@ class VoicePipeline extends EventEmitter {
     super();
     this.sessionId = sessionId;
     this.config = config;
+    this.pendingTtsLanguageFallbackMetric = null;
 
     this.activeProvider = config.llm.provider;
+
+    const initialTtsLanguage = resolveTtsLanguageCode(
+      this.config.tts.languageCode,
+      this.config.tts.languageCode
+    );
+    this.config.tts.languageCode = initialTtsLanguage.languageCode;
+    if (initialTtsLanguage.fallbackFrom) {
+      this.pendingTtsLanguageFallbackMetric = {
+        type: 'tts_language_fallback',
+        source: 'initial_config',
+        requested: initialTtsLanguage.fallbackFrom,
+        applied: initialTtsLanguage.languageCode,
+        reason: initialTtsLanguage.reason,
+      };
+    }
 
     this.vad = new VadHandler();
     this.bargeIn = new BargeInHandler();
@@ -178,6 +232,7 @@ class VoicePipeline extends EventEmitter {
     this.turnStates = new Map();
     this.turnCounter = 0;
 
+    this.sessionGreeting = null;
     this.stopped = false;
   }
 
@@ -185,13 +240,19 @@ class VoicePipeline extends EventEmitter {
     this.sessionStartedAtMs = Date.now();
     await this.#connectSttClient();
 
+    if (this.pendingTtsLanguageFallbackMetric) {
+      this.emit('metrics', this.pendingTtsLanguageFallbackMetric);
+      this.pendingTtsLanguageFallbackMetric = null;
+    }
+
     this.emit('ready', {
       sessionId: this.sessionId,
       startedAtMs: this.sessionStartedAtMs,
       startedAtIso: nowIso(this.sessionStartedAtMs),
-      runtimeTag: 'voice-ai-2026-02-14-r5',
+      runtimeTag: 'voice-ai-2026-02-14-r6',
       provider: this.activeProvider,
       sttLanguage: this.config.stt.languageCode,
+      ttsLanguage: this.config.tts.languageCode,
       sampleRate: this.config.stt.sampleRate,
     });
   }
@@ -232,25 +293,57 @@ class VoicePipeline extends EventEmitter {
 
     let restartStt = false;
     let resetTts = false;
+    let llmConfigChanged = false;
+
+    const parseFinite = (value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const parseBounded = (value, min, max) => {
+      const parsed = parseFinite(value);
+      if (parsed === null) return null;
+      return Math.min(max, Math.max(min, parsed));
+    };
+
+    const parseBoundedInt = (value, min, max) => {
+      const parsed = parseBounded(value, min, max);
+      if (parsed === null) return null;
+      return Math.round(parsed);
+    };
 
     if (next.provider && ['groq', 'cerebras'].includes(String(next.provider).toLowerCase())) {
       this.activeProvider = String(next.provider).toLowerCase();
     }
 
     if (next.language && String(next.language).trim()) {
-      const lang = String(next.language).trim();
-      if (lang !== this.config.stt.languageCode) {
-        this.config.stt.languageCode = lang;
+      const requestedLang = canonicalLanguageCode(next.language);
+      if (requestedLang !== this.config.stt.languageCode) {
+        this.config.stt.languageCode = requestedLang;
         restartStt = true;
       }
-      if (lang !== this.config.tts.languageCode) {
-        this.config.tts.languageCode = lang;
+
+      const resolvedTtsLanguage = resolveTtsLanguageCode(
+        requestedLang,
+        this.config.tts.languageCode
+      );
+      if (resolvedTtsLanguage.languageCode !== this.config.tts.languageCode) {
+        this.config.tts.languageCode = resolvedTtsLanguage.languageCode;
         resetTts = true;
+      }
+      if (resolvedTtsLanguage.fallbackFrom) {
+        this.emit('metrics', {
+          type: 'tts_language_fallback',
+          source: 'language',
+          requested: resolvedTtsLanguage.fallbackFrom,
+          applied: resolvedTtsLanguage.languageCode,
+          reason: resolvedTtsLanguage.reason,
+        });
       }
     }
 
     if (next.sttLanguage && String(next.sttLanguage).trim()) {
-      const lang = String(next.sttLanguage).trim();
+      const lang = canonicalLanguageCode(next.sttLanguage);
       if (lang !== this.config.stt.languageCode) {
         this.config.stt.languageCode = lang;
         restartStt = true;
@@ -258,11 +351,127 @@ class VoicePipeline extends EventEmitter {
     }
 
     if (next.ttsLanguage && String(next.ttsLanguage).trim()) {
-      const lang = String(next.ttsLanguage).trim();
-      if (lang !== this.config.tts.languageCode) {
-        this.config.tts.languageCode = lang;
+      const requestedTtsLang = canonicalLanguageCode(next.ttsLanguage);
+      const resolvedTtsLanguage = resolveTtsLanguageCode(
+        requestedTtsLang,
+        this.config.tts.languageCode
+      );
+      if (resolvedTtsLanguage.languageCode !== this.config.tts.languageCode) {
+        this.config.tts.languageCode = resolvedTtsLanguage.languageCode;
         resetTts = true;
       }
+      if (resolvedTtsLanguage.fallbackFrom) {
+        this.emit('metrics', {
+          type: 'tts_language_fallback',
+          source: 'ttsLanguage',
+          requested: resolvedTtsLanguage.fallbackFrom,
+          applied: resolvedTtsLanguage.languageCode,
+          reason: resolvedTtsLanguage.reason,
+        });
+      }
+    }
+
+    if (next.speaker && String(next.speaker).trim()) {
+      this.config.tts.speaker = String(next.speaker).trim();
+      resetTts = true;
+    }
+
+    if (next.systemPrompt) {
+      const promptText = String(next.systemPrompt).trim();
+      if (promptText) {
+        this.config.groq.systemPrompt = promptText;
+        this.config.cerebras.systemPrompt = promptText;
+      }
+    }
+
+    if (next.model && String(next.model).trim()) {
+      const model = String(next.model).trim();
+      if (this.activeProvider === 'cerebras') {
+        if (this.config.cerebras.model !== model) {
+          this.config.cerebras.model = model;
+          llmConfigChanged = true;
+        }
+      } else if (this.config.groq.model !== model) {
+        this.config.groq.model = model;
+        llmConfigChanged = true;
+      }
+    }
+
+    if (next.groqModel && String(next.groqModel).trim()) {
+      const model = String(next.groqModel).trim();
+      if (this.config.groq.model !== model) {
+        this.config.groq.model = model;
+        llmConfigChanged = true;
+      }
+    }
+
+    if (next.cerebrasModel && String(next.cerebrasModel).trim()) {
+      const model = String(next.cerebrasModel).trim();
+      if (this.config.cerebras.model !== model) {
+        this.config.cerebras.model = model;
+        llmConfigChanged = true;
+      }
+    }
+
+    const activeTemperature = parseBounded(next.temperature, 0, 2);
+    if (activeTemperature !== null) {
+      if (this.activeProvider === 'cerebras') {
+        if (this.config.cerebras.temperature !== activeTemperature) {
+          this.config.cerebras.temperature = activeTemperature;
+          llmConfigChanged = true;
+        }
+      } else if (this.config.groq.temperature !== activeTemperature) {
+        this.config.groq.temperature = activeTemperature;
+        llmConfigChanged = true;
+      }
+    }
+
+    const groqTemperature = parseBounded(next.groqTemperature, 0, 2);
+    if (groqTemperature !== null && this.config.groq.temperature !== groqTemperature) {
+      this.config.groq.temperature = groqTemperature;
+      llmConfigChanged = true;
+    }
+
+    const cerebrasTemperature = parseBounded(next.cerebrasTemperature, 0, 2);
+    if (cerebrasTemperature !== null && this.config.cerebras.temperature !== cerebrasTemperature) {
+      this.config.cerebras.temperature = cerebrasTemperature;
+      llmConfigChanged = true;
+    }
+
+    const activeMaxTokens = parseBoundedInt(
+      next.maxCompletionTokens ?? next.maxTokens,
+      32,
+      8192
+    );
+    if (activeMaxTokens !== null) {
+      if (this.activeProvider === 'cerebras') {
+        if (this.config.cerebras.maxCompletionTokens !== activeMaxTokens) {
+          this.config.cerebras.maxCompletionTokens = activeMaxTokens;
+          llmConfigChanged = true;
+        }
+      } else if (this.config.groq.maxCompletionTokens !== activeMaxTokens) {
+        this.config.groq.maxCompletionTokens = activeMaxTokens;
+        llmConfigChanged = true;
+      }
+    }
+
+    const groqMaxTokens = parseBoundedInt(next.groqMaxTokens, 32, 8192);
+    if (groqMaxTokens !== null && this.config.groq.maxCompletionTokens !== groqMaxTokens) {
+      this.config.groq.maxCompletionTokens = groqMaxTokens;
+      llmConfigChanged = true;
+    }
+
+    const cerebrasMaxTokens = parseBoundedInt(next.cerebrasMaxTokens, 32, 8192);
+    if (
+      cerebrasMaxTokens !== null &&
+      this.config.cerebras.maxCompletionTokens !== cerebrasMaxTokens
+    ) {
+      this.config.cerebras.maxCompletionTokens = cerebrasMaxTokens;
+      llmConfigChanged = true;
+    }
+
+    if (next.greeting) {
+      this.sessionGreeting = String(next.greeting).trim();
     }
 
     if (restartStt) {
@@ -278,13 +487,31 @@ class VoicePipeline extends EventEmitter {
       this.#clearContext();
     }
 
+    if (llmConfigChanged) {
+      this.providers.clear();
+      this.emit('metrics', {
+        type: 'llm_config_updated',
+        provider: this.activeProvider,
+        groqModel: this.config.groq.model,
+        cerebrasModel: this.config.cerebras.model,
+      });
+    }
+
     return {
       provider: this.activeProvider,
       sttLanguage: this.config.stt.languageCode,
       ttsLanguage: this.config.tts.languageCode,
       sttModel: this.config.stt.model,
       ttsSpeaker: this.config.tts.speaker,
+      groqModel: this.config.groq.model,
+      cerebrasModel: this.config.cerebras.model,
+      groqTemperature: this.config.groq.temperature,
+      cerebrasTemperature: this.config.cerebras.temperature,
+      groqMaxTokens: this.config.groq.maxCompletionTokens,
+      cerebrasMaxTokens: this.config.cerebras.maxCompletionTokens,
       contextTurns: this.#currentContextTurns(),
+      systemPrompt: this.config.groq.systemPrompt ? 'configured' : 'default',
+      greeting: this.sessionGreeting || 'none',
     };
   }
 
