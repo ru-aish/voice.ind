@@ -37,6 +37,7 @@ interface ReadyMessage {
   sessionId: string;
   provider: string;
   sttLanguage: string;
+  ttsLanguage?: string;
   startedAtMs: number;
 }
 
@@ -542,6 +543,10 @@ export class GdmLiveAudio extends LitElement {
     console.log(`[VoiceAI] Session ready: ${data.sessionId}`);
     console.log(`  Provider: ${data.provider}`);
     console.log(`  Language: ${data.sttLanguage}`);
+    if (data.ttsLanguage) {
+      console.log(`  TTS Language: ${data.ttsLanguage}`);
+      this.debugLog('ready_tts_language', data.ttsLanguage);
+    }
     
     this.updateStatus('Ready! Click the mic to start.');
 

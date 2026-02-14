@@ -249,9 +249,10 @@ class VoicePipeline extends EventEmitter {
       sessionId: this.sessionId,
       startedAtMs: this.sessionStartedAtMs,
       startedAtIso: nowIso(this.sessionStartedAtMs),
-      runtimeTag: 'voice-ai-2026-02-14-r5',
+      runtimeTag: 'voice-ai-2026-02-14-r6',
       provider: this.activeProvider,
       sttLanguage: this.config.stt.languageCode,
+      ttsLanguage: this.config.tts.languageCode,
       sampleRate: this.config.stt.sampleRate,
     });
   }

@@ -202,7 +202,7 @@ function handleServerMessage(raw) {
 
   if (type === 'ready') {
     log(
-      `ready provider=${data.provider} stt_language=${data.sttLanguage} started_at=${data.startedAtIso} runtime_tag=${data.runtimeTag || 'n/a'}`
+      `ready provider=${data.provider} stt_language=${data.sttLanguage} tts_language=${data.ttsLanguage ?? 'n/a'} started_at=${data.startedAtIso} runtime_tag=${data.runtimeTag || 'n/a'}`
     );
     if (!streamStarted) {
       startSpeaker();
