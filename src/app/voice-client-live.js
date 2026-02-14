@@ -30,10 +30,7 @@ function resolveClientTtsLanguage(sttLanguage) {
     return canonicalLanguageCode(explicit);
   }
   const normalizedStt = canonicalLanguageCode(sttLanguage);
-  if (normalizedStt.toLowerCase() === 'gu-in') {
-    return 'hi-IN';
-  }
-  return normalizedStt || 'hi-IN';
+  return normalizedStt || 'gu-IN';
 }
 
 const SERVER_PORT = Number(process.env.PORT || 8081);
@@ -46,7 +43,7 @@ const SPEAKER_DEVICE = process.env.SPEAKER_DEVICE || 'pulse';
 const SAMPLE_RATE = Number(process.env.SARVAM_STT_SAMPLE_RATE || 16000);
 const TTS_SAMPLE_RATE = Number(process.env.TTS_SAMPLE_RATE || process.env.VOICE_TTS_SAMPLE_RATE || 24000);
 const PROVIDER = (getArgValue('--provider') || process.env.DEFAULT_PROVIDER || 'groq').toLowerCase();
-const LANGUAGE = getArgValue('--language') || process.env.SARVAM_STT_LANGUAGE_CODE || 'hi-IN';
+const LANGUAGE = getArgValue('--language') || process.env.SARVAM_STT_LANGUAGE_CODE || 'gu-IN';
 const TTS_LANGUAGE = resolveClientTtsLanguage(LANGUAGE);
 const VERBOSE = hasFlag('--verbose') || String(process.env.VOICE_CLIENT_VERBOSE || 'false') === 'true';
 const ENABLE_SPEAKER = !hasFlag('--no-speaker');

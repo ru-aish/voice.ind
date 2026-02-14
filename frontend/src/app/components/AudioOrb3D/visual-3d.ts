@@ -36,6 +36,7 @@ export class GdmLiveAudioVisuals3D extends LitElement {
   private rotation = new THREE.Vector3(0, 0, 0);
   private animationFrameId: number | null = null;
   private isPaused = false;
+  private backdropSeed = Math.random() * 1000;
 
   private _outputNode!: AudioNode;
 
@@ -96,6 +97,7 @@ export class GdmLiveAudioVisuals3D extends LitElement {
     backdrop.material.side = THREE.BackSide;
     scene.add(backdrop);
     this.backdrop = backdrop;
+    (backdrop.material as THREE.RawShaderMaterial).uniforms.rand.value = this.backdropSeed;
 
     const camera = new THREE.PerspectiveCamera(
       75,
@@ -153,9 +155,9 @@ export class GdmLiveAudioVisuals3D extends LitElement {
 
     const bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      5,
-      0.5,
-      0,
+      2.2,
+      0.35,
+      0.2,
     );
 
     const fxaaPass = new ShaderPass(FXAAShader);
@@ -185,6 +187,7 @@ export class GdmLiveAudioVisuals3D extends LitElement {
     window.addEventListener('resize', onWindowResize);
     onWindowResize();
 
+    this.prevTime = performance.now();
     this.animation();
   }
 
@@ -203,7 +206,11 @@ export class GdmLiveAudioVisuals3D extends LitElement {
     const backdropMaterial = this.backdrop.material as THREE.RawShaderMaterial;
     const sphereMaterial = this.sphere.material as THREE.MeshStandardMaterial;
 
-    backdropMaterial.uniforms.rand.value = Math.random() * 10000;
+    const inputLevel = this.inputAnalyser.data[0] / 255;
+    const outputLevel = this.outputAnalyser.data[0] / 255;
+    const activity = (inputLevel + outputLevel) * 0.5;
+    this.backdropSeed += dt * (0.015 + activity * 0.06);
+    backdropMaterial.uniforms.rand.value = this.backdropSeed;
 
     if (sphereMaterial.userData.shader) {
       this.sphere.scale.setScalar(
@@ -255,7 +262,6 @@ export class GdmLiveAudioVisuals3D extends LitElement {
    * Pause the 3D animation loop
    */
   public pause() {
-    console.log('⏸️ Pausing 3D visuals');
     this.isPaused = true;
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
@@ -267,7 +273,6 @@ export class GdmLiveAudioVisuals3D extends LitElement {
    * Resume the 3D animation loop
    */
   public resume() {
-    console.log('▶️ Resuming 3D visuals');
     if (this.isPaused) {
       this.isPaused = false;
       this.prevTime = performance.now();

@@ -56,8 +56,8 @@ function languageLabel(languageCode) {
   return null;
 }
 
-const SUPPORTED_TTS_LANGUAGE_CODES = new Set(['hi-in', 'en-in']);
-const DEFAULT_TTS_FALLBACK_LANGUAGE = 'hi-IN';
+const SUPPORTED_TTS_LANGUAGE_CODES = new Set(['hi-in', 'en-in', 'gu-in']);
+const DEFAULT_TTS_FALLBACK_LANGUAGE = 'gu-IN';
 
 function canonicalLanguageCode(languageCode) {
   const normalized = String(languageCode || '').trim().toLowerCase();

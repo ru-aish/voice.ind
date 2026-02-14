@@ -14,6 +14,7 @@ export interface AgentSettings {
   promptId: string;
   promptContent: string;
   greeting: string;
+  showDebugLogs: boolean;
 }
 
 export interface PromptOption {
@@ -64,6 +65,7 @@ export class GdmSettingsModal extends LitElement {
   @state() declare promptId: string;
   @state() declare promptContent: string;
   @state() declare greeting: string;
+  @state() declare showDebugLogs: boolean;
   @state() declare prompts: PromptOption[];
   @state() declare loadingPrompts: boolean;
   @state() declare advancedOpen: boolean;
@@ -342,6 +344,40 @@ export class GdmSettingsModal extends LitElement {
       color: var(--accent);
     }
 
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid var(--field-border);
+      border-radius: 10px;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .toggle-title {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      color: var(--text-main);
+    }
+
+    .toggle-description {
+      margin-top: 4px;
+      color: var(--text-subtle);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .toggle-switch {
+      accent-color: var(--accent);
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
     .preview {
       margin-top: 8px;
       border-radius: 10px;
@@ -456,6 +492,7 @@ export class GdmSettingsModal extends LitElement {
     this.promptId = 'default';
     this.promptContent = 'You are a helpful voice assistant. Respond concisely and naturally.';
     this.greeting = 'Hello! How can I help you today?';
+    this.showDebugLogs = false;
     this.prompts = [];
     this.loadingPrompts = true;
     this.advancedOpen = false;
@@ -525,6 +562,7 @@ export class GdmSettingsModal extends LitElement {
       promptId: this.promptId,
       promptContent: this.promptContent.trim(),
       greeting: this.greeting.trim(),
+      showDebugLogs: Boolean(this.showDebugLogs),
     };
 
     this.dispatchEvent(
@@ -550,6 +588,7 @@ export class GdmSettingsModal extends LitElement {
     this.cerebrasMaxTokens = 2000;
     this.promptId = 'default';
     this.greeting = 'Hello! How can I help you today?';
+    this.showDebugLogs = false;
     const defaultPrompt = this.prompts.find((p: PromptOption) => p.id === 'default');
     if (defaultPrompt) {
       this.promptContent = defaultPrompt.content;
@@ -570,6 +609,7 @@ export class GdmSettingsModal extends LitElement {
       this.promptId = settings.promptId ?? 'default';
       this.promptContent = settings.promptContent ?? this.promptContent;
       this.greeting = settings.greeting ?? 'Hello! How can I help you today?';
+      this.showDebugLogs = settings.showDebugLogs ?? false;
     }
     this.isOpen = true;
   }
@@ -621,7 +661,7 @@ export class GdmSettingsModal extends LitElement {
                 </select>
                 <div class="description">
                   ${this.languageCode === 'gu-IN'
-                    ? 'Gujarati STT is enabled; TTS falls back to Hindi audio for compatibility.'
+                    ? 'Input and spoken response language are Gujarati.'
                     : 'Input and spoken response language follow this selection.'}
                 </div>
               </div>
@@ -752,6 +792,26 @@ export class GdmSettingsModal extends LitElement {
                     }}
                     placeholder="Hello! How can I help you today?"
                   />
+                </div>
+
+                <div class="form-group">
+                  <div class="toggle-row">
+                    <div>
+                      <p class="toggle-title">Frontend Debug Logs</p>
+                      <div class="toggle-description">
+                        Show detailed browser console logs and the live debug panel.
+                      </div>
+                    </div>
+                    <input
+                      id="show-debug-logs"
+                      class="toggle-switch"
+                      type="checkbox"
+                      .checked=${this.showDebugLogs}
+                      @change=${(e: Event) => {
+                        this.showDebugLogs = (e.target as HTMLInputElement).checked;
+                      }}
+                    />
+                  </div>
                 </div>
 
                 <div class="provider-block">

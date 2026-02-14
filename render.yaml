@@ -19,7 +19,7 @@ services:
       - key: SARVAM_STT_LANGUAGE_CODE
         value: gu-IN
       - key: TTS_TARGET_LANGUAGE_CODE
-        value: hi-IN
+        value: gu-IN
       - key: TTS_SPEAKER
         value: shubh
       - key: VOICE_SERVER_LOG_LEVEL
