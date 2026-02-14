@@ -15,6 +15,8 @@ export interface AgentSettings {
   promptContent: string;
   greeting: string;
   showDebugLogs: boolean;
+  useDeployedServer: boolean;
+  customServerUrl: string;
 }
 
 export interface PromptOption {
@@ -69,6 +71,8 @@ export class GdmSettingsModal extends LitElement {
   @state() declare promptContent: string;
   @state() declare greeting: string;
   @state() declare showDebugLogs: boolean;
+  @state() declare useDeployedServer: boolean;
+  @state() declare customServerUrl: string;
   @state() declare prompts: PromptOption[];
   @state() declare loadingPrompts: boolean;
   @state() declare hasUnsavedChanges: boolean;
@@ -661,6 +665,8 @@ export class GdmSettingsModal extends LitElement {
     this.promptContent = 'You are a helpful voice assistant. Respond concisely and naturally.';
     this.greeting = 'Hello! How can I help you today?';
     this.showDebugLogs = false;
+    this.useDeployedServer = false;
+    this.customServerUrl = 'wss://voice-ind.onrender.com/';
     this.prompts = [];
     this.loadingPrompts = true;
     this.hasUnsavedChanges = false;
@@ -701,6 +707,8 @@ export class GdmSettingsModal extends LitElement {
       promptContent: this.promptContent,
       greeting: this.greeting,
       showDebugLogs: this.showDebugLogs,
+      useDeployedServer: this.useDeployedServer,
+      customServerUrl: this.customServerUrl,
     });
   }
 
@@ -785,6 +793,8 @@ export class GdmSettingsModal extends LitElement {
       promptContent: this.promptContent.trim(),
       greeting: this.greeting.trim(),
       showDebugLogs: Boolean(this.showDebugLogs),
+      useDeployedServer: Boolean(this.useDeployedServer),
+      customServerUrl: this.customServerUrl.trim(),
     };
 
     this.dispatchEvent(
@@ -813,6 +823,8 @@ export class GdmSettingsModal extends LitElement {
     this.promptId = 'default';
     this.greeting = 'Hello! How can I help you today?';
     this.showDebugLogs = false;
+    this.useDeployedServer = false;
+    this.customServerUrl = 'wss://voice-ind.onrender.com/';
     const defaultPrompt = this.prompts.find((p: PromptOption) => p.id === 'default');
     if (defaultPrompt) {
       this.promptContent = defaultPrompt.content;
@@ -835,6 +847,8 @@ export class GdmSettingsModal extends LitElement {
       this.promptContent = settings.promptContent ?? this.promptContent;
       this.greeting = settings.greeting ?? 'Hello! How can I help you today?';
       this.showDebugLogs = settings.showDebugLogs ?? false;
+      this.useDeployedServer = settings.useDeployedServer ?? false;
+      this.customServerUrl = settings.customServerUrl ?? 'wss://voice-ind.onrender.com/';
     }
     this.savedSnapshot = this.takeSnapshot();
     this.hasUnsavedChanges = false;
@@ -906,6 +920,43 @@ export class GdmSettingsModal extends LitElement {
       <!-- Debug -->
       <div class="section">
         <div class="section-label">Developer</div>
+        
+        <div class="field" style="margin-bottom: 20px;">
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <p class="toggle-title">Use Deployed Server</p>
+              <div class="toggle-desc">Switch from localhost to production voice server</div>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                .checked=${this.useDeployedServer}
+                @change=${(e: Event) => {
+                  this.useDeployedServer = (e.target as HTMLInputElement).checked;
+                  this.checkUnsaved();
+                }}
+              />
+              <span class="switch-track"></span>
+            </label>
+          </div>
+        </div>
+
+        ${this.useDeployedServer ? html`
+          <div class="field" style="margin-bottom: 20px;">
+            <label class="field-label">Server URL</label>
+            <input
+              type="text"
+              .value=${this.customServerUrl}
+              @input=${(e: Event) => {
+                this.customServerUrl = (e.target as HTMLInputElement).value;
+                this.checkUnsaved();
+              }}
+              placeholder="wss://..."
+            />
+            <div class="field-hint">The WebSocket URL of the voice server</div>
+          </div>
+        ` : nothing}
+
         <div class="toggle-row">
           <div class="toggle-info">
             <p class="toggle-title">Debug Logs</p>

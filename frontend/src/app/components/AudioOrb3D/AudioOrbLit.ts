@@ -199,15 +199,16 @@ export class GdmLiveAudio extends LitElement {
     .controls .mic-btn {
       width: 64px;
       height: 64px;
-      background: rgba(0, 224, 158, 0.12);
-      border-color: rgba(0, 224, 158, 0.25);
-      color: #00e09e;
+      background: transparent;
+      border: none;
+      color: #ffffff;
+      border-radius: 12px;
+      box-shadow: none;
     }
 
     .controls .mic-btn:hover {
-      background: rgba(0, 224, 158, 0.18);
-      border-color: rgba(0, 224, 158, 0.35);
-      box-shadow: 0 0 24px rgba(0, 224, 158, 0.12);
+      transform: scale(1.1);
+      color: #ffffff;
     }
 
     .controls .stop-btn {
@@ -397,6 +398,8 @@ export class GdmLiveAudio extends LitElement {
       promptContent: 'You are a helpful voice assistant. Respond concisely and naturally.',
       greeting: 'Hello! How can I help you today?',
       showDebugLogs: false,
+      useDeployedServer: false,
+      customServerUrl: 'wss://voice-ind.onrender.com/',
     };
   }
 
@@ -559,7 +562,13 @@ export class GdmLiveAudio extends LitElement {
 
     return new Promise((resolve, reject) => {
       try {
-        const serverUrl = getVoiceServerUrl();
+        let serverUrl = '';
+        if (this.currentSettings.useDeployedServer && this.currentSettings.customServerUrl) {
+          serverUrl = this.currentSettings.customServerUrl;
+        } else {
+          serverUrl = getVoiceServerUrl();
+        }
+        
         this.infoLog(`[VoiceAI] Connecting to ${serverUrl}...`);
         this.debugLog('ws_connect_attempt', { serverUrl });
         this.ws = new WebSocket(serverUrl);
@@ -1250,7 +1259,7 @@ export class GdmLiveAudio extends LitElement {
               </svg>
             </button>
           ` : html`
-            <button class="stop-btn" @click=${() => this.stopRecording()} aria-label="Stop recording">
+            <button class="stop-btn" @click=${() => this.pause()} aria-label="Stop recording">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
