@@ -8,7 +8,8 @@
   "scripts": {
     "start": "node src/index.js",
     "check": "node --check src/index.js",
-    "client:live": "node src/app/voice-client-live.js"
+    "client:live": "node src/app/voice-client-live.js",
+    "client:prod": "VOICE_SERVER_URL=wss://voice-ind.onrender.com/ node src/app/voice-client-live.js"
   },
   "engines": {
     "node": ">=20"
