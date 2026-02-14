@@ -30,6 +30,9 @@ const LANGUAGE = getArgValue('--language') || process.env.SARVAM_STT_LANGUAGE_CO
 const VERBOSE = hasFlag('--verbose') || String(process.env.VOICE_CLIENT_VERBOSE || 'false') === 'true';
 const ENABLE_SPEAKER = !hasFlag('--no-speaker');
 const SPEAKER_RESTART_DELAY_MS = Number(process.env.VOICE_SPEAKER_RESTART_DELAY_MS || 50);
+const RECONNECT_ENABLED = !hasFlag('--no-reconnect');
+const RECONNECT_INITIAL_DELAY_MS = Number(process.env.VOICE_CLIENT_RECONNECT_DELAY || 1000);
+const RECONNECT_MAX_DELAY_MS = Number(process.env.VOICE_CLIENT_RECONNECT_MAX_DELAY || 10000);
 
 if (hasFlag('--help') || hasFlag('-h')) {
   console.log(`Usage:
@@ -41,6 +44,7 @@ Options:
   --provider=groq|cerebras
   --language=hi-IN|gu-IN|en-IN
   --no-speaker
+  --no-reconnect
   --verbose`);
   process.exit(0);
 }
@@ -52,6 +56,8 @@ let stopping = false;
 let streamStarted = false;
 let activeRequestId = null;
 let speakerRestartPending = false;
+let reconnectAttempts = 0;
+let reconnectTimer = null;
 const droppedRequestIds = new Set();
 const WAV_HEADER_SIZE = 44;
 
@@ -145,6 +151,7 @@ function interruptSpeakerPlayback(reason) {
 }
 
 function startRecorder() {
+  if (recorder) return;
   recorder = spawn(
     'arecord',
     ['-q', '-D', MIC_DEVICE, '-f', 'S16_LE', '-c', '1', '-r', String(SAMPLE_RATE), '-t', 'wav'],
@@ -345,6 +352,10 @@ function shutdown() {
   if (stopping) return;
   stopping = true;
   log('stopping...');
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   stopRecorder();
   stopSpeaker();
   if (ws && ws.readyState === ws.OPEN) {
@@ -353,13 +364,37 @@ function shutdown() {
   process.exit(0);
 }
 
-function main() {
+function getReconnectDelay() {
+  const baseDelay = RECONNECT_INITIAL_DELAY_MS;
+  const maxDelay = RECONNECT_MAX_DELAY_MS;
+  const delay = Math.min(baseDelay * Math.pow(2, reconnectAttempts), maxDelay);
+  const jitter = Math.random() * 0.3 * delay;
+  return Math.floor(delay + jitter);
+}
+
+function scheduleReconnect() {
+  if (stopping || !RECONNECT_ENABLED) {
+    return;
+  }
+  reconnectAttempts += 1;
+  const delay = getReconnectDelay();
+  log(`reconnecting in ${delay}ms (attempt ${reconnectAttempts})...`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connect();
+  }, delay);
+}
+
+function connect() {
+  if (stopping) return;
+
   log(`connecting url=${WS_URL}`);
-  log(`config provider=${PROVIDER} language=${LANGUAGE} mic_device=${MIC_DEVICE} speaker_enabled=${ENABLE_SPEAKER}`);
+  log(`config provider=${PROVIDER} language=${LANGUAGE} mic_device=${MIC_DEVICE} speaker_enabled=${ENABLE_SPEAKER} reconnect=${RECONNECT_ENABLED}`);
 
   ws = new WebSocket(WS_URL);
 
   ws.on('open', () => {
+    reconnectAttempts = 0;
     log(`connected at=${nowIso()}`);
 
     ws.send(
@@ -385,12 +420,24 @@ function main() {
 
   ws.on('close', (event) => {
     log(`socket_closed code=${event?.code ?? 'n/a'}`);
+    stopRecorder();
+    stopSpeaker();
+    streamStarted = false;
+    activeRequestId = null;
+    droppedRequestIds.clear();
+
     if (!stopping) {
-      stopRecorder();
-      stopSpeaker();
-      process.exit(1);
+      if (RECONNECT_ENABLED) {
+        scheduleReconnect();
+      } else {
+        process.exit(1);
+      }
     }
   });
+}
+
+function main() {
+  connect();
 }
 
 process.on('SIGINT', shutdown);
