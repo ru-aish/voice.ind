@@ -308,6 +308,18 @@ function handleServerMessage(raw) {
       );
       return;
     }
+    if (metricType === 'tts_language_fallback') {
+      log(
+        `tts_language_fallback source=${data.source ?? 'n/a'} requested=${data.requested ?? 'n/a'} applied=${data.applied ?? 'n/a'} reason=${data.reason ?? 'n/a'}`
+      );
+      return;
+    }
+    if (metricType === 'llm_config_updated') {
+      log(
+        `llm_config_updated provider=${data.provider ?? 'n/a'} groq_model=${data.groqModel ?? 'n/a'} cerebras_model=${data.cerebrasModel ?? 'n/a'}`
+      );
+      return;
+    }
     if (metricType === 'barge_in') {
       if (data.requestId) {
         droppedRequestIds.add(data.requestId);
