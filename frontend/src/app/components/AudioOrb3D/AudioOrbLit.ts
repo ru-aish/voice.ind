@@ -1190,11 +1190,15 @@ export class GdmLiveAudio extends LitElement {
 
     try {
       const response = await fetch('/api/prompts');
-      const data = await response.json();
-      if (data.prompts && data.prompts.length > 0) {
-        const defaultPrompt = data.prompts.find((p: { id: string }) => p.id === 'default');
-        if (defaultPrompt) {
-          this.currentSettings.promptContent = defaultPrompt.content;
+      if (!response.ok) {
+        this.errorLog(`[VoiceAI] Failed to load prompts: HTTP ${response.status} ${response.statusText}`);
+      } else {
+        const data = await response.json();
+        if (data.prompts && data.prompts.length > 0) {
+          const defaultPrompt = data.prompts.find((p: { id: string }) => p.id === 'default');
+          if (defaultPrompt) {
+            this.currentSettings.promptContent = defaultPrompt.content;
+          }
         }
       }
     } catch (error) {
