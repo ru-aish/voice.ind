@@ -32,11 +32,13 @@ export class GdmLiveAudioVisuals3D extends LitElement {
   private backdrop!: THREE.Mesh;
   private composer!: EffectComposer;
   private sphere!: THREE.Mesh;
+  private renderer!: THREE.WebGLRenderer;
   private prevTime = 0;
   private rotation = new THREE.Vector3(0, 0, 0);
   private animationFrameId: number | null = null;
   private isPaused = false;
   private backdropSeed = Math.random() * 1000;
+  private onWindowResize: (() => void) | null = null;
 
   private _outputNode!: AudioNode;
 
@@ -78,6 +80,18 @@ export class GdmLiveAudioVisuals3D extends LitElement {
     super.connectedCallback();
   }
 
+  disconnectedCallback() {
+    this.pause();
+    if (this.onWindowResize) {
+      window.removeEventListener('resize', this.onWindowResize);
+      this.onWindowResize = null;
+    }
+    if (this.renderer) {
+      this.renderer.dispose();
+    }
+    super.disconnectedCallback();
+  }
+
   private init() {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
@@ -114,6 +128,7 @@ export class GdmLiveAudioVisuals3D extends LitElement {
     });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio / 1);
+    this.renderer = renderer;
 
     const geometry = new THREE.IcosahedronGeometry(1, 10);
 
@@ -169,7 +184,7 @@ export class GdmLiveAudioVisuals3D extends LitElement {
 
     this.composer = composer;
 
-    function onWindowResize() {
+    this.onWindowResize = () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       const dPR = renderer.getPixelRatio();
@@ -182,10 +197,10 @@ export class GdmLiveAudioVisuals3D extends LitElement {
         1 / (w * dPR),
         1 / (h * dPR),
       );
-    }
+    };
 
-    window.addEventListener('resize', onWindowResize);
-    onWindowResize();
+    window.addEventListener('resize', this.onWindowResize);
+    this.onWindowResize();
 
     this.prevTime = performance.now();
     this.animation();

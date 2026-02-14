@@ -677,11 +677,14 @@ export class GdmSettingsModal extends LitElement {
   private async loadPrompts() {
     try {
       const response = await fetch('/api/prompts');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
       const data = await response.json();
       if (data.prompts) {
         this.prompts = data.prompts;
         const selected = this.prompts.find((p: PromptOption) => p.id === this.promptId);
-        if (selected && !this.promptContent) {
+        if (selected) {
           this.promptContent = selected.content;
         }
       }

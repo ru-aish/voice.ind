@@ -471,7 +471,7 @@ export class GdmLiveAudio extends LitElement {
   }
 
   private clearCCTimeouts() {
-    this.ccTimeouts.forEach(timeout => clearTimeout(timeout));
+    this.ccTimeouts.forEach(timeout => { clearTimeout(timeout); });
     this.ccTimeouts = [];
   }
 
@@ -548,11 +548,20 @@ export class GdmLiveAudio extends LitElement {
   private async connectWebSocket(): Promise<void> {
     if (this.isConnecting) {
       this.infoLog('[VoiceAI] Already connecting, waiting...');
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
+        const maxWaitMs = 10000;
+        const startTime = Date.now();
         const checkInterval = setInterval(() => {
+          const elapsed = Date.now() - startTime;
           if (!this.isConnecting && this.ws?.readyState === WebSocket.OPEN) {
             clearInterval(checkInterval);
             resolve();
+          } else if (!this.isConnecting && this.ws?.readyState !== WebSocket.OPEN) {
+            clearInterval(checkInterval);
+            reject(new Error('Connection failed while waiting'));
+          } else if (elapsed >= maxWaitMs) {
+            clearInterval(checkInterval);
+            reject(new Error('Connection wait timeout'));
           }
         }, 100);
       });
