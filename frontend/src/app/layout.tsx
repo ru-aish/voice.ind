@@ -1,12 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
-
-const inter = Inter({
-  subsets: ["latin"],
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "Voice AI",
@@ -32,12 +26,12 @@ export default function RootLayout({
       <head>
         <Script src="/config.js" strategy="beforeInteractive" />
       </head>
-      <body className={inter.className} style={{
+      <body style={{
         margin: 0,
         padding: 0,
         minHeight: '100dvh',
         display: 'flex',
-        flexDirection: 'column'
+        flexDirection: 'column',
       }}>
         {children}
       </body>

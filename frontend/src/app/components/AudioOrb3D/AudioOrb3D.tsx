@@ -130,7 +130,7 @@ const AudioOrb3D = forwardRef<AudioOrb3DHandle>((_, ref) => {
       style={{ 
         width: '100%', 
         height: '100vh',
-        background: '#000',
+        background: '#050505',
         position: 'relative'
       }}
       suppressHydrationWarning
@@ -141,23 +141,56 @@ const AudioOrb3D = forwardRef<AudioOrb3DHandle>((_, ref) => {
           top: '50%',
           left: '50%',
           transform: 'translate(-50%, -50%)',
-          color: 'white',
-          fontSize: '18px',
           textAlign: 'center',
-          padding: '20px',
-          maxWidth: '80%'
+          padding: '24px',
+          maxWidth: '80%',
         }}>
           {loadStatus === 'error' ? (
             <>
-              <div style={{ color: '#ff4444', marginBottom: '10px' }}>Error Loading Component</div>
-              <div style={{ fontSize: '14px', color: '#ccc' }}>{errorMessage}</div>
+              <div style={{
+                color: '#ff5c5c',
+                fontSize: '14px',
+                fontWeight: 600,
+                fontFamily: "'Instrument Sans', sans-serif",
+                marginBottom: '8px',
+              }}>
+                Failed to load
+              </div>
+              <div style={{
+                fontSize: '12px',
+                fontFamily: "'JetBrains Mono', monospace",
+                color: 'rgba(255, 255, 255, 0.35)',
+                lineHeight: 1.5,
+              }}>
+                {errorMessage}
+              </div>
             </>
           ) : (
             <>
-              <div>Loading Voice Agent...</div>
-              <div style={{ fontSize: '12px', marginTop: '10px', color: '#888' }}>
-                Please wait...
+              {/* Loading spinner */}
+              <div style={{
+                width: '32px',
+                height: '32px',
+                border: '2px solid rgba(255, 255, 255, 0.06)',
+                borderTopColor: '#00e09e',
+                borderRadius: '50%',
+                margin: '0 auto 16px',
+                animation: 'spin 0.8s linear infinite',
+              }} />
+              <div style={{
+                fontSize: '13px',
+                fontFamily: "'Instrument Sans', sans-serif",
+                fontWeight: 500,
+                color: 'rgba(255, 255, 255, 0.4)',
+                letterSpacing: '0.02em',
+              }}>
+                Loading...
               </div>
+              <style>{`
+                @keyframes spin {
+                  to { transform: rotate(360deg); }
+                }
+              `}</style>
             </>
           )}
         </div>

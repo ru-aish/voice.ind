@@ -128,98 +128,151 @@ export class GdmLiveAudio extends LitElement {
       display: block;
       width: 100%;
       height: 100vh;
-      background: #000000;
+      background: #050505;
       margin: 0;
       padding: 0;
+      font-family: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     }
 
+    /* ---- Status bar ---- */
     #status {
       position: absolute;
-      bottom: 5vh;
+      bottom: 4.5vh;
       left: 0;
       right: 0;
       z-index: 10;
       text-align: center;
+      font-size: 12px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.35);
+      letter-spacing: 0.03em;
+      font-family: 'JetBrains Mono', 'SF Mono', monospace;
     }
 
+    /* ---- Controls ---- */
     .controls {
       z-index: 10;
       position: absolute;
-      bottom: 10vh;
+      bottom: 9vh;
       left: 0;
       right: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      flex-direction: row;
-      gap: 10px;
-
-      button {
-        outline: none;
-        border: none;
-        color: white;
-        background: transparent;
-        width: 64px;
-        height: 64px;
-        cursor: pointer;
-        padding: 0;
-        margin: 0;
-
-        &:hover {
-          background: rgba(255, 255, 255, 0.1);
-        }
-      }
-
-      button[disabled] {
-        display: none;
-      }
+      gap: 12px;
     }
 
+    .controls button {
+      outline: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.85);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      cursor: pointer;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    .controls button:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.16);
+      transform: scale(1.05);
+    }
+
+    .controls button:active {
+      transform: scale(0.97);
+    }
+
+    .controls button[disabled] {
+      display: none;
+    }
+
+    .controls .mic-btn {
+      width: 64px;
+      height: 64px;
+      background: rgba(0, 224, 158, 0.12);
+      border-color: rgba(0, 224, 158, 0.25);
+      color: #00e09e;
+    }
+
+    .controls .mic-btn:hover {
+      background: rgba(0, 224, 158, 0.18);
+      border-color: rgba(0, 224, 158, 0.35);
+      box-shadow: 0 0 24px rgba(0, 224, 158, 0.12);
+    }
+
+    .controls .stop-btn {
+      width: 64px;
+      height: 64px;
+      background: rgba(255, 92, 92, 0.1);
+      border-color: rgba(255, 92, 92, 0.2);
+      color: #ff5c5c;
+    }
+
+    .controls .stop-btn:hover {
+      background: rgba(255, 92, 92, 0.16);
+      border-color: rgba(255, 92, 92, 0.3);
+      box-shadow: 0 0 24px rgba(255, 92, 92, 0.1);
+    }
+
+    /* ---- Captions ---- */
     .cc-container {
       position: absolute;
-      bottom: 18vh;
+      bottom: 20vh;
       left: 50%;
       transform: translateX(-50%);
       z-index: 10;
-      width: 90%;
-      max-width: 700px;
+      width: 88%;
+      max-width: 640px;
       text-align: center;
       display: flex;
       justify-content: center;
       align-items: center;
-      min-height: 60px;
+      min-height: 48px;
     }
 
     .cc-text {
       display: inline-block;
-      background: rgba(0, 0, 0, 0.8);
-      color: white;
-      padding: 14px 24px;
-      border-radius: 8px;
-      font-size: clamp(14px, 2.5vw, 18px);
-      line-height: 1.5;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      background: rgba(5, 5, 5, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      color: rgba(255, 255, 255, 0.9);
+      padding: 12px 22px;
+      border-radius: 12px;
+      font-size: clamp(14px, 2.2vw, 17px);
+      font-weight: 400;
+      line-height: 1.55;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
       text-align: center;
       max-width: 100%;
+      letter-spacing: 0.01em;
     }
 
     .cc-text.entering {
-      animation: ccSlideIn 0.15s ease-out forwards;
+      animation: ccIn 0.18s ease-out forwards;
     }
 
     .cc-text.exiting {
-      animation: ccSlideOut 0.15s ease-in forwards;
+      animation: ccOut 0.14s ease-in forwards;
     }
 
     .cc-text.hidden {
       display: none;
     }
 
-    @keyframes ccSlideIn {
+    @keyframes ccIn {
       from {
         opacity: 0;
-        transform: translateY(15px);
+        transform: translateY(10px);
       }
       to {
         opacity: 1;
@@ -227,49 +280,90 @@ export class GdmLiveAudio extends LitElement {
       }
     }
 
-    @keyframes ccSlideOut {
+    @keyframes ccOut {
       from {
         opacity: 1;
         transform: translateY(0);
       }
       to {
         opacity: 0;
-        transform: translateY(-15px);
+        transform: translateY(-8px);
       }
     }
 
+    /* ---- Settings button ---- */
+    .settings-btn {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      z-index: 100;
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      color: rgba(255, 255, 255, 0.4);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      padding: 0;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    .settings-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.12);
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    /* ---- Debug panel ---- */
     .debug-panel {
       position: absolute;
-      top: 80px;
+      top: 72px;
       right: 20px;
-      width: min(440px, calc(100vw - 40px));
-      max-height: 45vh;
+      width: min(400px, calc(100vw - 40px));
+      max-height: 40vh;
       overflow: auto;
       z-index: 30;
-      border-radius: 10px;
-      border: 1px solid rgba(49, 215, 165, 0.35);
-      background: rgba(4, 10, 16, 0.86);
-      color: #c3f8e9;
-      padding: 10px;
-      font-family: 'Consolas', 'SFMono-Regular', monospace;
+      border-radius: 12px;
+      border: 1px solid rgba(0, 224, 158, 0.15);
+      background: rgba(5, 5, 5, 0.88);
+      color: rgba(200, 240, 225, 0.85);
+      padding: 12px;
+      font-family: 'JetBrains Mono', 'SF Mono', monospace;
       font-size: 11px;
-      line-height: 1.4;
-      backdrop-filter: blur(6px);
+      line-height: 1.45;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    .debug-panel::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .debug-panel::-webkit-scrollbar-thumb {
+      background: rgba(0, 224, 158, 0.15);
+      border-radius: 2px;
     }
 
     .debug-title {
-      font-weight: 700;
-      color: #8dffd8;
+      font-weight: 600;
+      font-size: 10px;
+      color: rgba(0, 224, 158, 0.6);
       margin-bottom: 8px;
       text-transform: uppercase;
-      letter-spacing: 0.6px;
+      letter-spacing: 0.08em;
     }
 
     .debug-line {
       white-space: pre-wrap;
       word-break: break-word;
       padding: 2px 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      color: rgba(200, 240, 225, 0.65);
     }
   `;
 
@@ -1127,20 +1221,13 @@ export class GdmLiveAudio extends LitElement {
       <div>
         ${isDevelopment ? html`
           <button
-            id="settingsButton"
+            class="settings-btn"
             @click=${() => this.openSettings()}
-            style="position: absolute; top: 20px; right: 20px; z-index: 100; width: 50px; height: 50px; border-radius: 50%; background: transparent; border: none; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease;"
-            @mouseenter=${(e: MouseEvent) => {
-              const btn = e.target as HTMLElement;
-              btn.style.background = 'rgba(255, 255, 255, 0.2)';
-            }}
-            @mouseleave=${(e: MouseEvent) => {
-              const btn = e.target as HTMLElement;
-              btn.style.background = 'transparent';
-            }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
-              <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492M5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0"/>
-              <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.43.828-.021 1.872-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858z"/>
+            aria-label="Open settings"
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M7.5 2.25H10.5L11.25 4.5L13.5 5.25L15.75 4.5L17.25 7.5L15.75 9L16.5 11.25L15.75 13.5L13.5 12.75L11.25 13.5L10.5 15.75H7.5L6.75 13.5L4.5 12.75L2.25 13.5L0.75 10.5L2.25 9L1.5 6.75L2.25 4.5L4.5 5.25L6.75 4.5L7.5 2.25Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+              <circle cx="9" cy="9" r="2.5" stroke="currentColor" stroke-width="1.2"/>
             </svg>
           </button>
         ` : ''}
@@ -1155,25 +1242,21 @@ export class GdmLiveAudio extends LitElement {
 
         <div class="controls">
           ${!this.isRecording ? html`
-            <button id="micButton" @click=${() => this.startRecording()}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <button class="mic-btn" @click=${() => this.startRecording()} aria-label="Start recording">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
                 <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
                 <line x1="12" y1="19" x2="12" y2="23"></line>
               </svg>
             </button>
           ` : html`
-            <button id="muteButton" @click=${() => this.stopRecording()}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="1" y1="1" x2="23" y2="23"></line>
-                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-                <line x1="12" y1="19" x2="12" y2="23"></line>
-                <line x1="8" y1="23" x2="16" y2="23"></line>
+            <button class="stop-btn" @click=${() => this.stopRecording()} aria-label="Stop recording">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
             </button>
-            <button id="resetButton" @click=${this.reset}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <button @click=${this.reset} aria-label="Reset session">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"></path>
               </svg>
             </button>
@@ -1181,14 +1264,14 @@ export class GdmLiveAudio extends LitElement {
         </div>
 
         <div id="status">
-          ${this.error ? html`<span style="color: #ff4444;">${this.error}</span>` : this.status}
+          ${this.error ? html`<span style="color: #ff5c5c;">${this.error}</span>` : this.status}
         </div>
 
         ${showDebugPanel ? html`
           <div class="debug-panel">
-            <div class="debug-title">Frontend Debug Logs (${this.debugEvents.length})</div>
+            <div class="debug-title">Debug (${this.debugEvents.length})</div>
             ${this.debugEvents.length === 0
-              ? html`<div class="debug-line">No events yet...</div>`
+              ? html`<div class="debug-line">Waiting for events...</div>`
               : this.debugEvents.map((line) => html`<div class="debug-line">${line}</div>`)}
           </div>
         ` : ''}
