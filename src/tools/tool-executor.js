@@ -6,6 +6,10 @@
  */
 
 const { getCalendarService } = require('../core/calendar/google-calendar');
+const {
+  formatDateInTimeZone,
+  convertDateTimeStringsToInstantMs,
+} = require('../utils/timezone-utils');
 
 class ToolExecutor {
   constructor(config = {}) {
@@ -60,66 +64,6 @@ class ToolExecutor {
     };
   }
 
-  getDatePartsInTimeZone(input, timeZone) {
-    const date = input instanceof Date ? input : new Date(input);
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-    const parts = formatter.formatToParts(date);
-    const byType = {};
-    for (const part of parts) {
-      if (part.type !== 'literal') {
-        byType[part.type] = part.value;
-      }
-    }
-    return {
-      year: Number(byType.year),
-      month: Number(byType.month),
-      day: Number(byType.day),
-      hour: Number(byType.hour),
-      minute: Number(byType.minute),
-      second: Number(byType.second),
-    };
-  }
-
-  formatDateInTimeZone(date, timeZone) {
-    const parts = this.getDatePartsInTimeZone(date, timeZone);
-    return `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
-  }
-
-  getTimeZoneOffsetMs(instantMs, timeZone) {
-    const parts = this.getDatePartsInTimeZone(instantMs, timeZone);
-    const asUtc = Date.UTC(
-      parts.year,
-      parts.month - 1,
-      parts.day,
-      parts.hour,
-      parts.minute,
-      parts.second
-    );
-    return asUtc - instantMs;
-  }
-
-  convertZonedLocalToInstantMs(date, time, timeZone) {
-    const [year, month, day] = String(date || '').split('-').map(Number);
-    const [hour, minute] = String(time || '').split(':').map(Number);
-    const utcGuess = Date.UTC(year, month - 1, day, hour, minute, 0);
-    let instant = utcGuess;
-
-    for (let i = 0; i < 2; i += 1) {
-      instant = utcGuess - this.getTimeZoneOffsetMs(instant, timeZone);
-    }
-
-    return instant;
-  }
-
   /**
    * Check available time slots using Google Calendar
    */
@@ -129,11 +73,11 @@ class ToolExecutor {
       const timezone = args.timezone || this.defaultTimezone;
       
       // Get date (default to today)
-      const date = args.date || this.formatDateInTimeZone(new Date(), timezone);
+      const date = args.date || formatDateInTimeZone(new Date(), timezone);
       const timePreference = args.timePreference || 'any';
 
       // Filter out past slots if date is today
-      const today = this.formatDateInTimeZone(new Date(), timezone);
+      const today = formatDateInTimeZone(new Date(), timezone);
       const isToday = date === today;
 
       let availableSlots = await calendar.getAvailableSlots(date, timePreference, timezone);
@@ -145,7 +89,7 @@ class ToolExecutor {
         const minAllowedInstant = nowInstant + oneHourMs;
 
         availableSlots = availableSlots.filter(slot => {
-          const slotInstant = this.convertZonedLocalToInstantMs(date, slot, timezone);
+          const slotInstant = convertDateTimeStringsToInstantMs(date, slot, timezone);
           return slotInstant >= minAllowedInstant;
         });
       }
@@ -205,7 +149,7 @@ class ToolExecutor {
       }
 
       // Check if booking is in the past
-      const bookingInstant = this.convertZonedLocalToInstantMs(
+      const bookingInstant = convertDateTimeStringsToInstantMs(
         safeArgs.date,
         safeArgs.time,
         timezone

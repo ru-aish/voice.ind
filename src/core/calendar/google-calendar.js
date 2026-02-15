@@ -6,6 +6,13 @@
  */
 
 const { google } = require('googleapis');
+const {
+  parseDate,
+  parseTime,
+  formatLocalDateTime,
+  getDateTimePartsInTimeZone,
+  convertLocalDateTimeToInstantMs,
+} = require('../../utils/timezone-utils');
 
 class GoogleCalendarService {
   constructor(config = {}) {
@@ -59,10 +66,10 @@ class GoogleCalendarService {
    * Calculate start and end datetime for an event
    */
   calculateEventTimes(date, time, durationMinutes = 60, timeZone = this.defaultTimezone) {
-    const [year, month, day] = date.split('-').map(Number);
-    const [hours, minutes] = time.split(':').map(Number);
+    const { year, month, day } = parseDate(date);
+    const { hour: hours, minute: minutes } = parseTime(time);
 
-    const startInstantMs = this.convertLocalDateTimeToInstantMs(
+    const startInstantMs = convertLocalDateTimeToInstantMs(
       year,
       month,
       day,
@@ -71,11 +78,11 @@ class GoogleCalendarService {
       timeZone
     );
     const endInstantMs = startInstantMs + durationMinutes * 60 * 1000;
-    const endParts = this.getDateTimePartsInTimeZone(endInstantMs, timeZone);
+    const endParts = getDateTimePartsInTimeZone(endInstantMs, timeZone);
 
     return {
-      startDateTime: this.formatLocalDateTime(year, month, day, hours, minutes),
-      endDateTime: this.formatLocalDateTime(
+      startDateTime: formatLocalDateTime(year, month, day, hours, minutes),
+      endDateTime: formatLocalDateTime(
         endParts.year,
         endParts.month,
         endParts.day,
@@ -85,70 +92,6 @@ class GoogleCalendarService {
       startInstantMs,
       endInstantMs,
     };
-  }
-
-  formatLocalDateTime(year, month, day, hour, minute) {
-    const y = String(year).padStart(4, '0');
-    const m = String(month).padStart(2, '0');
-    const d = String(day).padStart(2, '0');
-    const h = String(hour).padStart(2, '0');
-    const min = String(minute).padStart(2, '0');
-    return `${y}-${m}-${d}T${h}:${min}:00`;
-  }
-
-  getDateTimePartsInTimeZone(input, timeZone) {
-    const date = input instanceof Date ? input : new Date(input);
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-    const parts = formatter.formatToParts(date);
-    const byType = {};
-    for (const part of parts) {
-      if (part.type !== 'literal') {
-        byType[part.type] = part.value;
-      }
-    }
-    return {
-      year: Number(byType.year),
-      month: Number(byType.month),
-      day: Number(byType.day),
-      hour: Number(byType.hour),
-      minute: Number(byType.minute),
-      second: Number(byType.second),
-    };
-  }
-
-  getTimeZoneOffsetMs(instantMs, timeZone) {
-    const date = new Date(instantMs);
-    const parts = this.getDateTimePartsInTimeZone(date, timeZone);
-    const asUtc = Date.UTC(
-      parts.year,
-      parts.month - 1,
-      parts.day,
-      parts.hour,
-      parts.minute,
-      parts.second
-    );
-    return asUtc - instantMs;
-  }
-
-  convertLocalDateTimeToInstantMs(year, month, day, hour, minute, timeZone) {
-    const utcGuess = Date.UTC(year, month - 1, day, hour, minute, 0);
-    let instant = utcGuess;
-
-    for (let i = 0; i < 2; i += 1) {
-      const offset = this.getTimeZoneOffsetMs(instant, timeZone);
-      instant = utcGuess - offset;
-    }
-
-    return instant;
   }
 
   /**
@@ -225,17 +168,59 @@ class GoogleCalendarService {
    * Get available time slots for a given date
    */
   async getAvailableSlots(date, timePreference = 'any', timeZone = this.defaultTimezone) {
-    const slots = this.generateTimeSlots(timePreference);
-    const availableSlots = [];
-
-    for (const slot of slots) {
-      const isAvailable = await this.checkAvailability(date, slot, 60, timeZone);
-      if (isAvailable) {
-        availableSlots.push(slot);
+    try {
+      const slots = this.generateTimeSlots(timePreference);
+      if (slots.length === 0) {
+        return [];
       }
-    }
 
-    return availableSlots;
+      const windows = slots
+        .map((slot) => {
+          const { startInstantMs, endInstantMs } = this.calculateEventTimes(
+            date,
+            slot,
+            60,
+            timeZone
+          );
+          return { slot, startInstantMs, endInstantMs };
+        })
+        .filter((window) => Number.isFinite(window.startInstantMs) && Number.isFinite(window.endInstantMs));
+
+      if (windows.length === 0) {
+        return [];
+      }
+
+      const rangeStartMs = Math.min(...windows.map((w) => w.startInstantMs));
+      const rangeEndMs = Math.max(...windows.map((w) => w.endInstantMs));
+
+      const response = await this.calendar.freebusy.query({
+        requestBody: {
+          timeMin: new Date(rangeStartMs).toISOString(),
+          timeMax: new Date(rangeEndMs).toISOString(),
+          timeZone,
+          items: [{ id: this.calendarId }],
+        },
+      });
+
+      const calendars = response.data.calendars;
+      if (!calendars || !calendars[this.calendarId]) {
+        return [];
+      }
+
+      const busyIntervals = (calendars[this.calendarId].busy || [])
+        .map((interval) => ({
+          startMs: Date.parse(interval.start),
+          endMs: Date.parse(interval.end),
+        }))
+        .filter((interval) => Number.isFinite(interval.startMs) && Number.isFinite(interval.endMs));
+
+      return windows
+        .filter((window) => !busyIntervals.some((busy) => window.startInstantMs < busy.endMs && window.endInstantMs > busy.startMs))
+        .map((window) => window.slot);
+    } catch (error) {
+      console.error('Error getting available slots:', error.message);
+      return [];
+    }
   }
 
   /**
