@@ -51,7 +51,7 @@ const DEFAULTS = {
     skipEndAfterLiveDispatch: true,
     dedupRepeatedTranscript: true,
     contextEnabled: true,
-    contextMaxTurns: 8,
+    contextMaxTurns: 500,
     contextMaxChars: 4000,
     streamDebug: true,
     streamDebugMaxPreviews: 2,
