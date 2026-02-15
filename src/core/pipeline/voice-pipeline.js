@@ -1,5 +1,7 @@
 const { EventEmitter } = require('events');
 
+const { toolDefinitions, ToolExecutor } = require('../../tools');
+
 const { SarvamSttClient } = require('../stt/sarvam-stt-client');
 const {
   extractTranscript,
@@ -208,6 +210,8 @@ class VoicePipeline extends EventEmitter {
 
     this.vad = new VadHandler();
     this.bargeIn = new BargeInHandler();
+
+    this.toolExecutor = new ToolExecutor();
 
     this.sttClient = null;
     this.ttsClient = null;
@@ -1239,20 +1243,42 @@ class VoicePipeline extends EventEmitter {
       });
   }
 
+  #buildToolResultMessages(toolCalls, toolResults) {
+    const messages = [];
+    
+    messages.push({
+      role: 'assistant',
+      content: null,
+      tool_calls: toolCalls.map(tc => ({
+        id: tc.id,
+        type: tc.type || 'function',
+        function: {
+          name: tc.function.name,
+          arguments: tc.function.arguments,
+        },
+      })),
+    });
+
+    for (const result of toolResults) {
+      messages.push({
+        role: 'tool',
+        tool_call_id: result.toolCallId,
+        content: typeof result.content === 'string' 
+          ? result.content 
+          : JSON.stringify(result.content),
+      });
+    }
+
+    return messages;
+  }
+
   async #runProviderTurn(prompt, providerName, requestId, detectionEndedAtMs, abortSignal) {
     const provider = this.#getProvider(providerName);
     const tts = await this.#ensureTtsClient();
 
     const tracker = new LatencyTracker(providerName, requestId, prompt, detectionEndedAtMs);
 
-    let bufferedText = '';
-    let ttsDeferredPrefix = '';
     let segmentIndex = 0;
-    let flushTimer = null;
-    let flushQueue = Promise.resolve();
-    let streamPreviewBuffer = '';
-    let streamPreviewCount = 0;
-
     const streamDebugEnabled = Boolean(this.config.pipeline.streamDebug);
     const streamDebugMaxPreviews = Math.max(
       0,
@@ -1263,40 +1289,8 @@ class VoicePipeline extends EventEmitter {
       Number(this.config.pipeline.streamDebugPreviewChars || 220)
     );
 
-    const emitStreamPreview = (text, reason) => {
-      if (!streamDebugEnabled || streamPreviewCount >= streamDebugMaxPreviews) return;
-      const value = String(text || '').trim();
-      if (!value) return;
-      streamPreviewCount += 1;
-      this.emit('metrics', {
-        type: 'provider_stream_preview',
-        requestId,
-        provider: providerName,
-        previewIndex: streamPreviewCount,
-        reason,
-        chars: value.length,
-        text: previewText(value, streamDebugPreviewChars),
-      });
-    };
-
-    const flushStreamPreview = (force = false) => {
-      if (!streamDebugEnabled || streamPreviewCount >= streamDebugMaxPreviews) return;
-      while (streamPreviewCount < streamDebugMaxPreviews) {
-        const idx = streamPreviewBuffer.search(/[.!?।॥\n]/u);
-        if (idx >= 0) {
-          const sentence = streamPreviewBuffer.slice(0, idx + 1).trim();
-          streamPreviewBuffer = streamPreviewBuffer.slice(idx + 1);
-          if (sentence) emitStreamPreview(sentence, 'sentence_boundary');
-          continue;
-        }
-        if (force) {
-          const remaining = streamPreviewBuffer.trim();
-          streamPreviewBuffer = '';
-          if (remaining) emitStreamPreview(remaining, 'stream_end_partial');
-        }
-        break;
-      }
-    };
+    const maxToolIterations = Math.max(1, Number(this.config.tools?.maxIterations || 5));
+    const toolsEnabled = this.config.tools?.enabled !== false;
 
     const throwIfAborted = () => {
       if (abortSignal?.aborted) {
@@ -1304,145 +1298,337 @@ class VoicePipeline extends EventEmitter {
       }
     };
 
-    const flushSegment = async (text, reason) => {
-      throwIfAborted();
-      const segmentText = String(text || '').trim();
-      if (!segmentText) return;
+    const executeToolCalls = async (toolCalls) => {
+      const results = [];
+      for (const toolCall of toolCalls) {
+        const toolName = toolCall.function?.name;
+        let toolArgs;
+        try {
+          toolArgs = JSON.parse(toolCall.function?.arguments || '{}');
+        } catch (err) {
+          const parseErrorResult = {
+            success: false,
+            error: `Invalid tool arguments JSON: ${err?.message || 'parse error'}`,
+          };
 
-      const mergedText = mergeText(ttsDeferredPrefix, segmentText);
-      if (!mergedText) return;
+          this.emit('tool_result', {
+            requestId,
+            toolName,
+            result: parseErrorResult,
+          });
 
-      const contentPrepared = this.config.pipeline.ttsSanitize
-        ? sanitizeTextForTtsLanguage(mergedText, this.config.tts.languageCode)
-        : mergedText;
-      if (!contentPrepared) {
-        ttsDeferredPrefix = '';
+          results.push({
+            toolCallId: toolCall.id,
+            toolName,
+            content: parseErrorResult,
+          });
+
+          this.emit('metrics', {
+            type: 'tool_result',
+            requestId,
+            provider: providerName,
+            toolName,
+            toolCallId: toolCall.id,
+            success: false,
+            reason: 'invalid_tool_arguments_json',
+          });
+          continue;
+        }
+        
+        this.emit('tool_call', {
+          requestId,
+          toolName,
+          arguments: toolArgs,
+        });
+
         this.emit('metrics', {
-          type: 'skip_tts_segment',
+          type: 'tool_call',
           requestId,
           provider: providerName,
-          reason: 'empty_after_tts_sanitize',
-          ttsLanguage: this.config.tts.languageCode,
-          textChars: mergedText.length,
-          textPreview: previewText(mergedText),
+          toolName,
+          toolCallId: toolCall.id,
         });
-        return;
-      }
 
-      if (contentPrepared !== mergedText) {
+        let result;
+        try {
+          result = await this.toolExecutor.execute(toolName, toolArgs);
+        } catch (err) {
+          result = { success: false, error: err?.message || 'Tool execution failed' };
+        }
+
+        this.emit('tool_result', {
+          requestId,
+          toolName,
+          result,
+        });
+
+        results.push({
+          toolCallId: toolCall.id,
+          toolName,
+          content: result,
+        });
+
         this.emit('metrics', {
-          type: 'tts_text_sanitized',
+          type: 'tool_result',
           requestId,
           provider: providerName,
-          ttsLanguage: this.config.tts.languageCode,
-          originalChars: mergedText.length,
-          sanitizedChars: contentPrepared.length,
-          originalPreview: previewText(mergedText),
-          sanitizedPreview: previewText(contentPrepared),
+          toolName,
+          toolCallId: toolCall.id,
+          success: result?.success !== false,
         });
       }
+      return results;
+    };
 
-      if (!hasRequiredScriptChar(contentPrepared, this.config.tts.languageCode)) {
-        ttsDeferredPrefix = contentPrepared;
+    const processStreamWithTts = async (currentMessages, iteration) => {
+      let bufferedText = '';
+      let ttsDeferredPrefix = '';
+      let flushTimer = null;
+      let flushQueue = Promise.resolve();
+      let streamPreviewBuffer = '';
+      let streamPreviewCount = 0;
+
+      const emitStreamPreview = (text, reason) => {
+        if (!streamDebugEnabled || streamPreviewCount >= streamDebugMaxPreviews) return;
+        const value = String(text || '').trim();
+        if (!value) return;
+        streamPreviewCount += 1;
         this.emit('metrics', {
-          type: 'skip_tts_segment',
+          type: 'provider_stream_preview',
           requestId,
           provider: providerName,
-          reason: 'missing_required_language_char',
-          ttsLanguage: this.config.tts.languageCode,
-          textChars: contentPrepared.length,
-          textPreview: previewText(contentPrepared),
+          previewIndex: streamPreviewCount,
+          reason,
+          chars: value.length,
+          text: previewText(value, streamDebugPreviewChars),
         });
-        return;
-      }
+      };
 
-      ttsDeferredPrefix = '';
-      const content = contentPrepared;
+      const flushStreamPreview = (force = false) => {
+        if (!streamDebugEnabled || streamPreviewCount >= streamDebugMaxPreviews) return;
+        while (streamPreviewCount < streamDebugMaxPreviews) {
+          const idx = streamPreviewBuffer.search(/[.!?।॥\n]/u);
+          if (idx >= 0) {
+            const sentence = streamPreviewBuffer.slice(0, idx + 1).trim();
+            streamPreviewBuffer = streamPreviewBuffer.slice(idx + 1);
+            if (sentence) emitStreamPreview(sentence, 'sentence_boundary');
+            continue;
+          }
+          if (force) {
+            const remaining = streamPreviewBuffer.trim();
+            streamPreviewBuffer = '';
+            if (remaining) emitStreamPreview(remaining, 'stream_end_partial');
+          }
+          break;
+        }
+      };
 
-      segmentIndex += 1;
-      const segStartMs = Date.now();
-      this.#appendSpokenForTurn(requestId, content);
+      const flushSegment = async (text, reason) => {
+        throwIfAborted();
+        const segmentText = String(text || '').trim();
+        if (!segmentText) return;
 
-      let ttsResult;
-      try {
-        ttsResult = await tts.speakText(content, {
-          onAudioChunk: ({ base64, atMs }) => {
-            this.emit('audio', {
-              requestId,
-              provider: providerName,
-              segmentIndex,
-              audioBase64: base64,
-              atMs,
-              atIso: nowIso(atMs),
-            });
-          },
-        });
-      } catch (err) {
-        if (isSarvamAllowedLanguageError(err) || isAnyTtsError(err)) {
+        const mergedText = mergeText(ttsDeferredPrefix, segmentText);
+        if (!mergedText) return;
+
+        const contentPrepared = this.config.pipeline.ttsSanitize
+          ? sanitizeTextForTtsLanguage(mergedText, this.config.tts.languageCode)
+          : mergedText;
+        if (!contentPrepared) {
+          ttsDeferredPrefix = '';
           this.emit('metrics', {
             type: 'skip_tts_segment',
             requestId,
             provider: providerName,
-            reason: isSarvamAllowedLanguageError(err)
-              ? 'sarvam_allowed_language_error'
-              : 'tts_error_non_fatal',
+            reason: 'empty_after_tts_sanitize',
             ttsLanguage: this.config.tts.languageCode,
-            textChars: content.length,
-            textPreview: previewText(content),
-            errorPreview: previewText(String(err?.message || err || '')),
+            textChars: mergedText.length,
+            textPreview: previewText(mergedText),
           });
           return;
         }
-        throw err;
-      }
 
-      throwIfAborted();
+        if (contentPrepared !== mergedText) {
+          this.emit('metrics', {
+            type: 'tts_text_sanitized',
+            requestId,
+            provider: providerName,
+            ttsLanguage: this.config.tts.languageCode,
+            originalChars: mergedText.length,
+            sanitizedChars: contentPrepared.length,
+            originalPreview: previewText(mergedText),
+            sanitizedPreview: previewText(contentPrepared),
+          });
+        }
 
-      const segment = {
-        index: segmentIndex,
-        reason,
-        text: content,
-        textChars: content.length,
-        sentAtMs: ttsResult.sentAtMs,
-        sentAtIso: nowIso(ttsResult.sentAtMs),
-        firstChunkAtMs: ttsResult.firstAudioAtMs,
-        firstChunkAtIso: nowIso(ttsResult.firstAudioAtMs),
-        sendToFirstChunkMs: ttsResult.sendToFirstAudioMs,
-        totalTtsMs: ttsResult.totalTtsMs,
-        audioChunkCount: ttsResult.audioChunkCount,
-        audioBytes: ttsResult.audioBytes,
-        processingWallMs: Date.now() - segStartMs,
+        if (!hasRequiredScriptChar(contentPrepared, this.config.tts.languageCode)) {
+          ttsDeferredPrefix = contentPrepared;
+          this.emit('metrics', {
+            type: 'skip_tts_segment',
+            requestId,
+            provider: providerName,
+            reason: 'missing_required_language_char',
+            ttsLanguage: this.config.tts.languageCode,
+            textChars: contentPrepared.length,
+            textPreview: previewText(contentPrepared),
+          });
+          return;
+        }
+
+        ttsDeferredPrefix = '';
+        const content = contentPrepared;
+
+        segmentIndex += 1;
+        const segStartMs = Date.now();
+        this.#appendSpokenForTurn(requestId, content);
+
+        let ttsResult;
+        try {
+          ttsResult = await tts.speakText(content, {
+            onAudioChunk: ({ base64, atMs }) => {
+              this.emit('audio', {
+                requestId,
+                provider: providerName,
+                segmentIndex,
+                audioBase64: base64,
+                atMs,
+                atIso: nowIso(atMs),
+              });
+            },
+          });
+        } catch (err) {
+          if (isSarvamAllowedLanguageError(err) || isAnyTtsError(err)) {
+            this.emit('metrics', {
+              type: 'skip_tts_segment',
+              requestId,
+              provider: providerName,
+              reason: isSarvamAllowedLanguageError(err)
+                ? 'sarvam_allowed_language_error'
+                : 'tts_error_non_fatal',
+              ttsLanguage: this.config.tts.languageCode,
+              textChars: content.length,
+              textPreview: previewText(content),
+              errorPreview: previewText(String(err?.message || err || '')),
+            });
+            return;
+          }
+          throw err;
+        }
+
+        throwIfAborted();
+
+        const segment = {
+          index: segmentIndex,
+          reason,
+          text: content,
+          textChars: content.length,
+          sentAtMs: ttsResult.sentAtMs,
+          sentAtIso: nowIso(ttsResult.sentAtMs),
+          firstChunkAtMs: ttsResult.firstAudioAtMs,
+          firstChunkAtIso: nowIso(ttsResult.firstAudioAtMs),
+          sendToFirstChunkMs: ttsResult.sendToFirstAudioMs,
+          totalTtsMs: ttsResult.totalTtsMs,
+          audioChunkCount: ttsResult.audioChunkCount,
+          audioBytes: ttsResult.audioBytes,
+          processingWallMs: Date.now() - segStartMs,
+        };
+
+        tracker.addSegment(segment);
       };
 
-      tracker.addSegment(segment);
-    };
+      const enqueueFlush = (text, reason) => {
+        if (abortSignal?.aborted) return flushQueue;
+        const content = String(text || '').trim();
+        if (!content) return flushQueue;
+        flushQueue = flushQueue.then(() => flushSegment(content, reason));
+        return flushQueue;
+      };
 
-    const enqueueFlush = (text, reason) => {
-      if (abortSignal?.aborted) return flushQueue;
-      const content = String(text || '').trim();
-      if (!content) return flushQueue;
-      flushQueue = flushQueue.then(() => flushSegment(content, reason));
-      return flushQueue;
-    };
+      const drainBuffered = (reason) => {
+        const text = bufferedText;
+        bufferedText = '';
+        return enqueueFlush(text, reason);
+      };
 
-    const drainBuffered = (reason) => {
-      const text = bufferedText;
-      bufferedText = '';
-      return enqueueFlush(text, reason);
-    };
-
-    const scheduleTimeoutFlush = () => {
-      if (abortSignal?.aborted) return;
-      if (flushTimer) clearTimeout(flushTimer);
-      flushTimer = setTimeout(() => {
-        drainBuffered('timeout').catch((err) => {
-          if (abortSignal?.aborted || isAbortLikeError(err)) return;
-          if (isSarvamAllowedLanguageError(err) || isAnyTtsError(err)) return;
-          this.emit('error', {
-            error: `flush_timeout_error request=${requestId} message=${err?.message || err}`,
+      const scheduleTimeoutFlush = () => {
+        if (abortSignal?.aborted) return;
+        if (flushTimer) clearTimeout(flushTimer);
+        flushTimer = setTimeout(() => {
+          drainBuffered('timeout').catch((err) => {
+            if (abortSignal?.aborted || isAbortLikeError(err)) return;
+            if (isSarvamAllowedLanguageError(err) || isAnyTtsError(err)) return;
+            this.emit('error', {
+              error: `flush_timeout_error request=${requestId} message=${err?.message || err}`,
+            });
           });
+        }, this.config.bridge.flushTimeoutMs);
+      };
+
+      const accumulatedToolCalls = [];
+
+      const providerMetrics = await provider.streamText({
+        prompt,
+        messages: currentMessages,
+        abortSignal,
+        tools: toolsEnabled ? toolDefinitions : undefined,
+        onFirstToken: async ({ atMs, source }) => {
+          if (iteration === 0) {
+            tracker.markFirstToken(atMs, source);
+          }
+        },
+        onToken: async (tokenText) => {
+          throwIfAborted();
+
+          tracker.addGeneratedText(tokenText);
+          tracker.addTokensApprox(countTokensApprox(tokenText));
+          this.#appendGeneratedForTurn(requestId, tokenText);
+          streamPreviewBuffer += tokenText;
+          flushStreamPreview(false);
+
+          bufferedText += tokenText;
+          const { chunks, remaining } = extractLineChunks(bufferedText, this.config.tts.maxTextChars);
+          bufferedText = remaining;
+
+          for (const ready of chunks) {
+            throwIfAborted();
+            await enqueueFlush(ready, 'line_or_limit');
+          }
+
+          scheduleTimeoutFlush();
+        },
+        onToolCall: async (toolCall) => {
+          accumulatedToolCalls.push(toolCall);
+        },
+      });
+
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+
+      if (bufferedText.trim()) {
+        await drainBuffered('stream_end');
+      }
+
+      await flushQueue;
+      flushStreamPreview(true);
+
+      if (ttsDeferredPrefix.trim()) {
+        this.emit('metrics', {
+          type: 'skip_tts_segment',
+          requestId,
+          provider: providerName,
+          reason: 'stream_ended_without_required_language_char',
+          ttsLanguage: this.config.tts.languageCode,
+          textChars: ttsDeferredPrefix.trim().length,
+          textPreview: previewText(ttsDeferredPrefix),
         });
-      }, this.config.bridge.flushTimeoutMs);
+      }
+
+      return {
+        providerMetrics,
+        toolCalls: accumulatedToolCalls,
+      };
     };
 
     const contextMessages = this.#buildContextMessages(prompt);
@@ -1456,67 +1642,57 @@ class VoicePipeline extends EventEmitter {
       promptChars: String(prompt || '').length,
     });
 
-    const providerMetrics = await provider.streamText({
-      prompt,
-      messages: contextMessages,
-      abortSignal,
-      onFirstToken: async ({ atMs, source }) => {
-        tracker.markFirstToken(atMs, source);
-      },
-      onToken: async (tokenText) => {
-        throwIfAborted();
+    let currentMessages = contextMessages;
+    let iteration = 0;
+    let finalProviderMetrics = null;
 
-        tracker.addGeneratedText(tokenText);
-        tracker.addTokensApprox(countTokensApprox(tokenText));
-        this.#appendGeneratedForTurn(requestId, tokenText);
-        streamPreviewBuffer += tokenText;
-        flushStreamPreview(false);
+    while (iteration < maxToolIterations) {
+      throwIfAborted();
 
-        bufferedText += tokenText;
-        const { chunks, remaining } = extractLineChunks(bufferedText, this.config.tts.maxTextChars);
-        bufferedText = remaining;
+      const { providerMetrics, toolCalls } = await processStreamWithTts(currentMessages, iteration);
 
-        for (const ready of chunks) {
-          throwIfAborted();
-          await enqueueFlush(ready, 'line_or_limit');
-        }
+      if (iteration === 0) {
+        tracker.setProviderFinishReason(providerMetrics.finishReason);
+      }
 
-        scheduleTimeoutFlush();
-      },
-    });
-    tracker.setProviderFinishReason(providerMetrics.finishReason);
+      if (!toolCalls || toolCalls.length === 0) {
+        finalProviderMetrics = providerMetrics;
+        break;
+      }
 
-    if (flushTimer) {
-      clearTimeout(flushTimer);
-      flushTimer = null;
-    }
-
-    if (bufferedText.trim()) {
-      await drainBuffered('stream_end');
-    }
-
-    await flushQueue;
-    flushStreamPreview(true);
-
-    if (ttsDeferredPrefix.trim()) {
       this.emit('metrics', {
-        type: 'skip_tts_segment',
+        type: 'tool_calls_detected',
         requestId,
         provider: providerName,
-        reason: 'stream_ended_without_required_language_char',
-        ttsLanguage: this.config.tts.languageCode,
-        textChars: ttsDeferredPrefix.trim().length,
-        textPreview: previewText(ttsDeferredPrefix),
+        iteration,
+        toolCallCount: toolCalls.length,
+        toolNames: toolCalls.map(tc => tc.function?.name),
       });
-      ttsDeferredPrefix = '';
+
+      const toolResults = await executeToolCalls(toolCalls);
+
+      const toolResultMessages = this.#buildToolResultMessages(toolCalls, toolResults);
+      currentMessages = [...currentMessages, ...toolResultMessages];
+
+      iteration += 1;
+
+      if (iteration >= maxToolIterations) {
+        this.emit('metrics', {
+          type: 'tool_iteration_limit',
+          requestId,
+          provider: providerName,
+          maxIterations: maxToolIterations,
+        });
+        break;
+      }
     }
 
-    if (providerMetrics.finishReason === 'length') {
+    if (finalProviderMetrics?.finishReason === 'length') {
       this.emit('metrics', {
         type: 'provider_truncated',
         requestId,
         provider: providerName,
-        finishReason: providerMetrics.finishReason,
+        finishReason: finalProviderMetrics.finishReason,
         configuredMaxTokens:
           providerName === 'cerebras'
             ? this.config.cerebras.maxCompletionTokens
@@ -1526,7 +1702,7 @@ class VoicePipeline extends EventEmitter {
 
     throwIfAborted();
 
-    return tracker.complete(providerMetrics.tpsApprox);
+    return tracker.complete(finalProviderMetrics?.tpsApprox);
   }
 
   #handleSttMessage(response) {
