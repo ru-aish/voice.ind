@@ -5,6 +5,153 @@ import Image from 'next/image';
 import styles from './styles.module.css';
 import { trackAction } from './components/Tracker';
 
+// Constants
+const WORKING_DAYS_PER_YEAR = 260;
+
+// Static data - moved outside component for performance
+const TESTIMONIALS = [
+    {
+        name: "Rajesh Mehta",
+        role: "CEO, TechScale Solutions",
+        quote: "We were losing 40% of leads because nobody picked up calls after hours. Ab har call attend hoti hai, and bookings are up 67%. Total game changer for our business.",
+        metric: "67% more conversions",
+        image: "/images/testimonials/michael.png"
+    },
+    {
+        name: "Priya Sharma",
+        role: "Operations Head, GrowthBox",
+        quote: "The AI handles inquiries, schedules demos, and follows up — sab kuch automatic. Our team now focuses only on closing deals instead of answering phones all day.",
+        metric: "₹8L saved monthly",
+        image: "/images/testimonials/sarah.png"
+    },
+    {
+        name: "Amit Verma",
+        role: "Founder, QuickServ India",
+        quote: "Customer complaints about wait times dropped 90%. The AI picks up instantly and resolves queries faster than any receptionist we ever hired. Best investment this year.",
+        metric: "90% faster response",
+        image: "/images/testimonials/james.png"
+    }
+];
+
+const FEATURES = [
+    {
+        icon: (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <path d="M16 2v4M8 2v4M3 10h18" />
+                <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
+            </svg>
+        ),
+        title: "Smart Appointment Booking",
+        description: "Customers book, reschedule, or cancel 24/7. Real-time calendar sync with your existing tools — no double bookings, ever."
+    },
+    {
+        icon: (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M9 12l2 2 4-4" />
+                <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+            </svg>
+        ),
+        title: "Instant Query Resolution",
+        description: "Answers FAQs about your services, pricing, hours, and availability — no human needed. Customers get instant help."
+    },
+    {
+        icon: (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+        ),
+        title: "Lead Capture & Qualification",
+        description: "Captures caller details, qualifies leads based on your criteria, and sends them straight to your CRM automatically."
+    },
+    {
+        icon: (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+        ),
+        title: "Automated Follow-ups",
+        description: "Sends reminders, confirmation messages, and follow-up calls automatically. Reduces no-shows and keeps customers engaged."
+    },
+    {
+        icon: (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+            </svg>
+        ),
+        title: "Natural Voice Conversations",
+        description: "Sounds 100% human. Callers can't tell it's AI — warm, natural, and adapts to conversation flow in real-time."
+    },
+    {
+        icon: (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                <path d="m15 5 4 4" />
+            </svg>
+        ),
+        title: "Reschedule & Cancel",
+        description: "Customers manage their own appointments easily, freeing your staff for high-value work that actually needs a human."
+    },
+    {
+        icon: (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4" />
+                <path d="M12 8h.01" />
+            </svg>
+        ),
+        title: "Business Information",
+        description: "Answers questions about services, locations, hours, directions, and what to expect — like your best receptionist, but 24/7."
+    },
+    {
+        icon: (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72" />
+                <path d="M15 7a4 4 0 0 0-4 4" />
+                <path d="M19 7a8 8 0 0 0-8 8" />
+            </svg>
+        ),
+        title: "Smart Call Routing",
+        description: "Identifies urgent situations and routes them to the right person instantly. No important call ever gets lost."
+    }
+];
+
+const FAQS = [
+    {
+        question: "How natural does the AI voice sound?",
+        answer: "Our AI uses state-of-the-art voice synthesis tuned for natural conversation. In blind tests, 92% of callers couldn't tell they were speaking with an AI. The voice is warm, professional, and adapts its pace based on the caller's needs — Hindi, English, or Hinglish."
+    },
+    {
+        question: "Can it handle complex scheduling with multiple team members?",
+        answer: "Bilkul. The AI integrates with your calendar to see real-time availability across all team members. It can match customers with specific people, handle recurring appointments, and respect your scheduling rules — sab automatically."
+    },
+    {
+        question: "What happens if a caller has an urgent issue?",
+        answer: "The AI recognizes urgent situations and follows your defined escalation protocols. It can immediately transfer to on-call staff, take detailed messages for urgent callback, or provide emergency instructions as you configure."
+    },
+    {
+        question: "Kya yeh Hindi mein baat kar sakta hai?",
+        answer: "Haan, bilkul! Our AI supports Hindi, English, and Hinglish conversations naturally. It detects the caller's language preference and switches seamlessly — no awkward transitions."
+    },
+    {
+        question: "Will it integrate with our existing systems?",
+        answer: "We integrate with all major CRMs, calendar systems, and business tools — Zoho, Google Workspace, HubSpot, and more. Setup is seamless and bi-directional, so changes made anywhere are reflected everywhere."
+    },
+    {
+        question: "How long does setup take?",
+        answer: "Most businesses are fully operational within 2-3 hours. We handle the technical integration, train the AI on your specific services and policies, and provide a dedicated success manager for the first 30 days."
+    },
+    {
+        question: "Can we customize the AI's responses?",
+        answer: "Absolutely. You control the greeting, personality, and specific responses for your business. Want the AI to mention your specialties, promote new offers, or follow specific scripts? It's all customizable through our dashboard."
+    }
+];
+
 export default function VersionFive() {
     const [openFaq, setOpenFaq] = useState<number | null>(null);
     const [openChainItem, setOpenChainItem] = useState<number | null>(null);
@@ -31,7 +178,9 @@ export default function VersionFive() {
         );
 
         const elements = document.querySelectorAll('[data-animate]');
-        elements.forEach((el) => observerRef.current?.observe(el));
+        elements.forEach((el) => {
+            observerRef.current?.observe(el);
+        });
 
         return () => observerRef.current?.disconnect();
     }, []);
@@ -45,150 +194,6 @@ export default function VersionFive() {
             image: "/images/testimonials/michael.png"
         },
         {
-            name: "Priya Sharma",
-            role: "Operations Head, GrowthBox",
-            quote: "The AI handles inquiries, schedules demos, and follows up — sab kuch automatic. Our team now focuses only on closing deals instead of answering phones all day.",
-            metric: "₹8L saved monthly",
-            image: "/images/testimonials/sarah.png"
-        },
-        {
-            name: "Amit Verma",
-            role: "Founder, QuickServ India",
-            quote: "Customer complaints about wait times dropped 90%. The AI picks up instantly and resolves queries faster than any receptionist we ever hired. Best investment this year.",
-            metric: "90% faster response",
-            image: "/images/testimonials/james.png"
-        }
-    ];
-
-    const features = [
-        {
-            icon: (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="3" y="4" width="18" height="18" rx="2" />
-                    <path d="M16 2v4M8 2v4M3 10h18" />
-                    <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
-                </svg>
-            ),
-            title: "Smart Appointment Booking",
-            description: "Customers book, reschedule, or cancel 24/7. Real-time calendar sync with your existing tools — no double bookings, ever."
-        },
-        {
-            icon: (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M9 12l2 2 4-4" />
-                    <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
-                </svg>
-            ),
-            title: "Instant Query Resolution",
-            description: "Answers FAQs about your services, pricing, hours, and availability — no human needed. Customers get instant help."
-        },
-        {
-            icon: (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                    <circle cx="9" cy="7" r="4" />
-                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                </svg>
-            ),
-            title: "Lead Capture & Qualification",
-            description: "Captures caller details, qualifies leads based on your criteria, and sends them straight to your CRM automatically."
-        },
-        {
-            icon: (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-                    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-                </svg>
-            ),
-            title: "Automated Follow-ups",
-            description: "Sends reminders, confirmation messages, and follow-up calls automatically. Reduces no-shows and keeps customers engaged."
-        },
-        {
-            icon: (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                </svg>
-            ),
-            title: "Natural Voice Conversations",
-            description: "Sounds 100% human. Callers can't tell it's AI — warm, natural, and adapts to conversation flow in real-time."
-        },
-        {
-            icon: (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-                    <path d="m15 5 4 4" />
-                </svg>
-            ),
-            title: "Reschedule & Cancel",
-            description: "Customers manage their own appointments easily, freeing your staff for high-value work that actually needs a human."
-        },
-        {
-            icon: (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M12 16v-4" />
-                    <path d="M12 8h.01" />
-                </svg>
-            ),
-            title: "Business Information",
-            description: "Answers questions about services, locations, hours, directions, and what to expect — like your best receptionist, but 24/7."
-        },
-        {
-            icon: (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72" />
-                    <path d="M15 7a4 4 0 0 0-4 4" />
-                    <path d="M19 7a8 8 0 0 0-8 8" />
-                </svg>
-            ),
-            title: "Smart Call Routing",
-            description: "Identifies urgent situations and routes them to the right person instantly. No important call ever gets lost."
-        }
-    ];
-
-    const faqs = [
-        {
-            question: "How natural does the AI voice sound?",
-            answer: "Our AI uses state-of-the-art voice synthesis tuned for natural conversation. In blind tests, 92% of callers couldn't tell they were speaking with an AI. The voice is warm, professional, and adapts its pace based on the caller's needs — Hindi, English, or Hinglish."
-        },
-        {
-            question: "Can it handle complex scheduling with multiple team members?",
-            answer: "Bilkul. The AI integrates with your calendar to see real-time availability across all team members. It can match customers with specific people, handle recurring appointments, and respect your scheduling rules — sab automatically."
-        },
-        {
-            question: "What happens if a caller has an urgent issue?",
-            answer: "The AI recognizes urgent situations and follows your defined escalation protocols. It can immediately transfer to on-call staff, take detailed messages for urgent callback, or provide emergency instructions as you configure."
-        },
-        {
-            question: "Kya yeh Hindi mein baat kar sakta hai?",
-            answer: "Haan, bilkul! Our AI supports Hindi, English, and Hinglish conversations naturally. It detects the caller's language preference and switches seamlessly — no awkward transitions."
-        },
-        {
-            question: "Will it integrate with our existing systems?",
-            answer: "We integrate with all major CRMs, calendar systems, and business tools — Zoho, Google Workspace, HubSpot, and more. Setup is seamless and bi-directional, so changes made anywhere are reflected everywhere."
-        },
-        {
-            question: "How long does setup take?",
-            answer: "Most businesses are fully operational within 2-3 hours. We handle the technical integration, train the AI on your specific services and policies, and provide a dedicated success manager for the first 30 days."
-        },
-        {
-            question: "Can we customize the AI's responses?",
-            answer: "Absolutely. You control the greeting, personality, and specific responses for your business. Want the AI to mention your specialties, promote new offers, or follow specific scripts? It's all customizable through our dashboard."
-        }
-    ];
-
-    return (
-        <div className={styles.container}>
-            {/* Floating Particles */}
-            <div className={styles.particles}>
-                {[...Array(30)].map((_, i) => (
-                    <div
-                        key={i}
-                        className={styles.particle}
-                        style={{
-                            left: `${Math.random() * 100}%`,
                             top: `${Math.random() * 100}%`,
                             animationDelay: `${Math.random() * 20}s`,
                             animationDuration: `${20 + Math.random() * 30}s`
@@ -493,7 +498,7 @@ export default function VersionFive() {
 
                             <div className={styles.calcResult}>
                                 <div className={styles.calcResultAmount}>
-                                    ₹{(calcValues.callsPerDay * calcValues.dealValue * (calcValues.missRate / 100) * 260).toLocaleString('en-IN')}
+                                    ₹{(calcValues.callsPerDay * calcValues.dealValue * (calcValues.missRate / 100) * WORKING_DAYS_PER_YEAR).toLocaleString('en-IN')}
                                     <span>/year</span>
                                 </div>
                                 <p className={styles.calcResultLabel}>Lost revenue from missed customer calls</p>
@@ -673,7 +678,7 @@ export default function VersionFive() {
                 </div>
 
                 <div className={styles.featureGrid}>
-                    {features.map((feature, index) => (
+                    {FEATURES.map((feature, index) => (
                         <div key={index} className={styles.featureCard} style={{ animationDelay: `${index * 0.1}s` }}>
                             <div className={styles.featureIcon}>
                                 {feature.icon}
@@ -693,7 +698,7 @@ export default function VersionFive() {
                 </div>
 
                 <div className={styles.testimonialGrid}>
-                    {testimonials.map((testimonial, index) => (
+                    {TESTIMONIALS.map((testimonial, index) => (
                         <div key={index} className={styles.testimonialCard}>
                             <div className={styles.testimonialMetric}>{testimonial.metric}</div>
                             <p className={styles.testimonialQuote}>&quot;{testimonial.quote}&quot;</p>
@@ -703,6 +708,7 @@ export default function VersionFive() {
                                         src={testimonial.image}
                                         alt={testimonial.name}
                                         fill
+                                        sizes="48px"
                                         style={{ objectFit: 'cover' }}
                                     />
                                 </div>
@@ -724,7 +730,7 @@ export default function VersionFive() {
                 </div>
 
                 <div className={styles.faqContainer}>
-                    {faqs.map((faq, index) => (
+                    {FAQS.map((faq, index) => (
                         <div key={index} className={styles.faqItem}>
                             <button
                                 className={`${styles.faqQuestion} ${openFaq === index ? styles.faqOpen : ''}`}
