@@ -37,9 +37,9 @@ interface QueuedAction {
 
 // Singleton state to prevent issues with React Strict Mode and HMR
 const trackerState = {
-    trackerState.actionQueue: [] as QueuedAction[],
-    trackerState.sessionStartTime: 0,
-    trackerState.sessionStartSent: false,
+    actionQueue: [] as QueuedAction[],
+    sessionStartTime: 0,
+    sessionStartSent: false,
     isInitialized: false
 };
 
