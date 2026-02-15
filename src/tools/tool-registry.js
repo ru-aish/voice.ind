@@ -24,7 +24,8 @@ const checkAvailabilityDef = {
     type: "object",
     properties: {
       date: { type: "string", description: "Date in YYYY-MM-DD format" },
-      timePreference: { type: "string", enum: ["morning", "afternoon", "evening", "any"], description: "Preferred time of day" }
+      timePreference: { type: "string", enum: ["morning", "afternoon", "evening", "any"], description: "Preferred time of day" },
+      timezone: { type: "string", description: "User's IANA timezone (e.g., 'America/New_York')" }
     },
     required: []
   }
@@ -43,7 +44,8 @@ const bookDemoDef = {
       date: { type: "string", description: "Date in YYYY-MM-DD format" },
       time: { type: "string", description: "Time in HH:MM format (24-hour)" },
       duration: { type: "string", enum: ["30", "60", "90"], description: "Duration in minutes" },
-      notes: { type: "string", description: "Special requests" }
+      notes: { type: "string", description: "Special requests" },
+      timezone: { type: "string", description: "User's IANA timezone (e.g., 'America/New_York')" }
     },
     required: ["leadName", "email", "date", "time"]
   }

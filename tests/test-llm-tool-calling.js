@@ -5,7 +5,10 @@ const { toolDefinitions } = require('../src/tools');
 function getTomorrowDate() {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  return tomorrow.toISOString().split('T')[0];
+  const year = tomorrow.getFullYear();
+  const month = String(tomorrow.getMonth() + 1).padStart(2, '0');
+  const day = String(tomorrow.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 async function runTest(prompt, testLabel) {
@@ -28,10 +31,7 @@ async function runTest(prompt, testLabel) {
   const toolCalls = [];
   const tokens = [];
 
-  const groqTools = toolDefinitions.map(tool => ({
-    type: 'function',
-    function: tool,
-  }));
+  const groqTools = toolDefinitions;
 
   const result = await provider.streamText({
     prompt,
@@ -68,7 +68,7 @@ async function runTest(prompt, testLabel) {
 async function main() {
   console.log('=== Groq Provider Tool Calling Test ===');
   console.log('Model:', process.env.GROQ_MODEL || 'llama-3.3-70b-versatile');
-  console.log('Available tools:', toolDefinitions.map(t => t.name).join(', '));
+  console.log('Available tools:', toolDefinitions.map(t => t.function?.name).join(', '));
 
   if (!process.env.GROQ_API_KEY) {
     console.error('ERROR: GROQ_API_KEY not found in environment');

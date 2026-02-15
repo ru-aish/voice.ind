@@ -1302,7 +1302,38 @@ class VoicePipeline extends EventEmitter {
       const results = [];
       for (const toolCall of toolCalls) {
         const toolName = toolCall.function?.name;
-        const toolArgs = JSON.parse(toolCall.function?.arguments || '{}');
+        let toolArgs;
+        try {
+          toolArgs = JSON.parse(toolCall.function?.arguments || '{}');
+        } catch (err) {
+          const parseErrorResult = {
+            success: false,
+            error: `Invalid tool arguments JSON: ${err?.message || 'parse error'}`,
+          };
+
+          this.emit('tool_result', {
+            requestId,
+            toolName,
+            result: parseErrorResult,
+          });
+
+          results.push({
+            toolCallId: toolCall.id,
+            toolName,
+            content: parseErrorResult,
+          });
+
+          this.emit('metrics', {
+            type: 'tool_result',
+            requestId,
+            provider: providerName,
+            toolName,
+            toolCallId: toolCall.id,
+            success: false,
+            reason: 'invalid_tool_arguments_json',
+          });
+          continue;
+        }
         
         this.emit('tool_call', {
           requestId,
@@ -1548,11 +1579,9 @@ class VoicePipeline extends EventEmitter {
         onToken: async (tokenText) => {
           throwIfAborted();
 
-          if (iteration === 0) {
-            tracker.addGeneratedText(tokenText);
-            tracker.addTokensApprox(countTokensApprox(tokenText));
-            this.#appendGeneratedForTurn(requestId, tokenText);
-          }
+          tracker.addGeneratedText(tokenText);
+          tracker.addTokensApprox(countTokensApprox(tokenText));
+          this.#appendGeneratedForTurn(requestId, tokenText);
           streamPreviewBuffer += tokenText;
           flushStreamPreview(false);
 

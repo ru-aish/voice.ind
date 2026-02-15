@@ -11,6 +11,12 @@ class ToolExecutor {
   constructor(config = {}) {
     this.config = config;
     this.calendarService = null;
+    this.defaultTimezone =
+      config.defaultTimezone ||
+      process.env.BOOKING_TIMEZONE ||
+      process.env.DEFAULT_TIMEZONE ||
+      Intl.DateTimeFormat().resolvedOptions().timeZone ||
+      'UTC';
   }
 
   /**
@@ -26,7 +32,7 @@ class ToolExecutor {
   /**
    * Execute a tool by name
    */
-  async execute(toolName, args) {
+  async execute(toolName, args = {}) {
     switch (toolName) {
       case 'capture_lead_info':
         return await this.captureLeadInfo(args);
@@ -45,12 +51,73 @@ class ToolExecutor {
    * Could be extended to save to a database
    */
   async captureLeadInfo(args) {
-    console.log('📝 Lead info captured:', args.name, args.email);
+    const safeArgs = args || {};
+    console.log('📝 Lead info captured:', safeArgs.name, safeArgs.email);
     return {
       success: true,
-      message: `Lead info captured for ${args.name}`,
-      data: args
+      message: `Lead info captured for ${safeArgs.name || 'unknown lead'}`,
+      data: safeArgs
     };
+  }
+
+  getDatePartsInTimeZone(input, timeZone) {
+    const date = input instanceof Date ? input : new Date(input);
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(date);
+    const byType = {};
+    for (const part of parts) {
+      if (part.type !== 'literal') {
+        byType[part.type] = part.value;
+      }
+    }
+    return {
+      year: Number(byType.year),
+      month: Number(byType.month),
+      day: Number(byType.day),
+      hour: Number(byType.hour),
+      minute: Number(byType.minute),
+      second: Number(byType.second),
+    };
+  }
+
+  formatDateInTimeZone(date, timeZone) {
+    const parts = this.getDatePartsInTimeZone(date, timeZone);
+    return `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+  }
+
+  getTimeZoneOffsetMs(instantMs, timeZone) {
+    const parts = this.getDatePartsInTimeZone(instantMs, timeZone);
+    const asUtc = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second
+    );
+    return asUtc - instantMs;
+  }
+
+  convertZonedLocalToInstantMs(date, time, timeZone) {
+    const [year, month, day] = String(date || '').split('-').map(Number);
+    const [hour, minute] = String(time || '').split(':').map(Number);
+    const utcGuess = Date.UTC(year, month - 1, day, hour, minute, 0);
+    let instant = utcGuess;
+
+    for (let i = 0; i < 2; i += 1) {
+      instant = utcGuess - this.getTimeZoneOffsetMs(instant, timeZone);
+    }
+
+    return instant;
   }
 
   /**
@@ -59,36 +126,34 @@ class ToolExecutor {
   async checkAvailability(args) {
     try {
       const calendar = this.getCalendarService();
+      const timezone = args.timezone || this.defaultTimezone;
       
       // Get date (default to today)
-      const date = args.date || new Date().toISOString().split('T')[0];
+      const date = args.date || this.formatDateInTimeZone(new Date(), timezone);
       const timePreference = args.timePreference || 'any';
 
       // Filter out past slots if date is today
-      const today = new Date().toISOString().split('T')[0];
+      const today = this.formatDateInTimeZone(new Date(), timezone);
       const isToday = date === today;
 
-      let availableSlots = await calendar.getAvailableSlots(date, timePreference);
+      let availableSlots = await calendar.getAvailableSlots(date, timePreference, timezone);
 
       // Filter past slots for today
       if (isToday) {
-        const now = new Date();
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
+        const nowInstant = Date.now();
+        const oneHourMs = 60 * 60 * 1000;
+        const minAllowedInstant = nowInstant + oneHourMs;
 
         availableSlots = availableSlots.filter(slot => {
-          const [slotHour, slotMinute] = slot.split(':').map(Number);
-          const bufferHour = currentHour + 1;
-
-          if (slotHour > bufferHour) return true;
-          if (slotHour === bufferHour && slotMinute > currentMinute) return true;
-          return false;
+          const slotInstant = this.convertZonedLocalToInstantMs(date, slot, timezone);
+          return slotInstant >= minAllowedInstant;
         });
       }
 
       return {
         success: true,
         date,
+        timezone,
         timePreference,
         availableSlots,
         count: availableSlots.length
@@ -107,53 +172,63 @@ class ToolExecutor {
    */
   async bookDemo(args) {
     try {
+      const safeArgs = args || {};
+      const timezone = safeArgs.timezone || this.defaultTimezone;
+
       // Validate required fields
-      if (!args.leadName) {
+      if (!safeArgs.leadName) {
         return { success: false, error: 'Missing leadName' };
       }
-      if (!args.email) {
+      if (!safeArgs.email) {
         return { success: false, error: 'Missing email' };
       }
-      if (!args.date) {
+      if (!safeArgs.date) {
         return { success: false, error: 'Missing date' };
       }
-      if (!args.time) {
+      if (!safeArgs.time) {
         return { success: false, error: 'Missing time' };
       }
 
       // Validate email format
-      if (!args.email.includes('@')) {
+      if (!safeArgs.email.includes('@')) {
         return { success: false, error: 'Invalid email format' };
       }
 
       // Validate date format (YYYY-MM-DD)
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(args.date)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(safeArgs.date)) {
         return { success: false, error: 'Invalid date format. Use YYYY-MM-DD' };
       }
 
       // Validate time format (HH:MM)
-      if (!/^\d{2}:\d{2}$/.test(args.time)) {
+      if (!/^\d{2}:\d{2}$/.test(safeArgs.time)) {
         return { success: false, error: 'Invalid time format. Use HH:MM' };
       }
 
       // Check if booking is in the past
-      const bookingDate = new Date(`${args.date}T${args.time}:00`);
-      if (bookingDate < new Date()) {
+      const bookingInstant = this.convertZonedLocalToInstantMs(
+        safeArgs.date,
+        safeArgs.time,
+        timezone
+      );
+      if (Number.isNaN(bookingInstant)) {
+        return { success: false, error: 'Invalid date/time values' };
+      }
+      if (bookingInstant < Date.now()) {
         return { success: false, error: 'Cannot book appointments in the past' };
       }
 
       const calendar = this.getCalendarService();
 
       const result = await calendar.bookAppointment({
-        leadName: args.leadName.trim().substring(0, 100),
-        email: args.email.trim().toLowerCase().substring(0, 100),
-        phone: args.phone?.trim().substring(0, 20),
-        company: args.company?.trim().substring(0, 100),
-        date: args.date.trim(),
-        time: args.time.trim(),
-        duration: args.duration || '60',
-        notes: args.notes?.trim().substring(0, 500),
-        timezone: args.timezone || 'Asia/Kolkata'
+        leadName: safeArgs.leadName.trim().substring(0, 100),
+        email: safeArgs.email.trim().toLowerCase().substring(0, 100),
+        phone: safeArgs.phone?.trim().substring(0, 20),
+        company: safeArgs.company?.trim().substring(0, 100),
+        date: safeArgs.date.trim(),
+        time: safeArgs.time.trim(),
+        duration: safeArgs.duration || '60',
+        notes: safeArgs.notes?.trim().substring(0, 500),
+        timezone
       });
 
       return result;

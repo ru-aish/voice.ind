@@ -1,5 +1,6 @@
 const Cerebras = require('@cerebras/cerebras_cloud_sdk');
 const { LlmProvider, countTokensApprox, isReasoningModel } = require('./types');
+const { accumulateToolCallDelta, flushAccumulatedToolCalls } = require('./tool-call-accumulator');
 
 function extractDeltaText(chunk, allowReasoningFallback) {
   const choice = chunk?.choices?.[0];
@@ -117,42 +118,12 @@ class CerebrasProvider extends LlmProvider {
       const delta = choice?.delta;
       if (delta?.tool_calls) {
         for (const toolCallDelta of delta.tool_calls) {
-          const index = toolCallDelta.index;
-          let accumulated = accumulatedToolCalls.get(index);
-
-          if (!accumulated) {
-            accumulated = {
-              id: toolCallDelta.id || '',
-              type: toolCallDelta.type || 'function',
-              function: {
-                name: toolCallDelta.function?.name || '',
-                arguments: '',
-              },
-            };
-            accumulatedToolCalls.set(index, accumulated);
-          }
-
-          if (toolCallDelta.id) {
-            accumulated.id = toolCallDelta.id;
-          }
-          if (toolCallDelta.function?.name) {
-            accumulated.function.name = toolCallDelta.function.name;
-          }
-          if (toolCallDelta.function?.arguments) {
-            accumulated.function.arguments += toolCallDelta.function.arguments;
-          }
+          accumulateToolCallDelta(accumulatedToolCalls, toolCallDelta);
         }
       }
     }
 
-    if (accumulatedToolCalls.size > 0 && onToolCall) {
-      const sortedIndices = [...accumulatedToolCalls.keys()].sort((a, b) => a - b);
-      for (const index of sortedIndices) {
-        const toolCall = accumulatedToolCalls.get(index);
-        metrics.toolCalls.push(toolCall);
-        await onToolCall(toolCall);
-      }
-    }
+    await flushAccumulatedToolCalls(accumulatedToolCalls, metrics, onToolCall);
 
     metrics.streamCompletedAtMs = Date.now();
     const durationMs = metrics.streamCompletedAtMs - metrics.promptSentAtMs;

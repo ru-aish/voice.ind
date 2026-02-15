@@ -10,7 +10,7 @@ function printResult(testName, result) {
 
 async function runTests() {
   console.log('Tool Calling Tests\n');
-  console.log('Available tools:', toolDefinitions.map(t => t.name).join(', '));
+  console.log('Available tools:', toolDefinitions.map(t => t.function?.name).join(', '));
   console.log('API Base URL: http://localhost:3002\n');
 
   console.log('--- Test 1: check_availability ---');
@@ -46,4 +46,7 @@ async function runTests() {
   console.log('\n=== All tests completed ===');
 }
 
-runTests().catch(console.error);
+runTests().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

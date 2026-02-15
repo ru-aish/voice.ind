@@ -15,6 +15,12 @@ class GoogleCalendarService {
     const calendarId = config.calendarId || process.env.GOOGLE_CALENDAR_ID || 'primary';
 
     this.calendarId = calendarId;
+    this.defaultTimezone =
+      config.defaultTimezone ||
+      process.env.BOOKING_TIMEZONE ||
+      process.env.DEFAULT_TIMEZONE ||
+      Intl.DateTimeFormat().resolvedOptions().timeZone ||
+      'UTC';
 
     let auth;
 
@@ -52,17 +58,97 @@ class GoogleCalendarService {
   /**
    * Calculate start and end datetime for an event
    */
-  calculateEventTimes(date, time, durationMinutes = 60) {
+  calculateEventTimes(date, time, durationMinutes = 60, timeZone = this.defaultTimezone) {
     const [year, month, day] = date.split('-').map(Number);
     const [hours, minutes] = time.split(':').map(Number);
 
-    const startDate = new Date(year, month - 1, day, hours, minutes);
-    const endDate = new Date(startDate.getTime() + durationMinutes * 60 * 1000);
+    const startInstantMs = this.convertLocalDateTimeToInstantMs(
+      year,
+      month,
+      day,
+      hours,
+      minutes,
+      timeZone
+    );
+    const endInstantMs = startInstantMs + durationMinutes * 60 * 1000;
+    const endParts = this.getDateTimePartsInTimeZone(endInstantMs, timeZone);
 
     return {
-      startDateTime: startDate.toISOString(),
-      endDateTime: endDate.toISOString()
+      startDateTime: this.formatLocalDateTime(year, month, day, hours, minutes),
+      endDateTime: this.formatLocalDateTime(
+        endParts.year,
+        endParts.month,
+        endParts.day,
+        endParts.hour,
+        endParts.minute
+      ),
+      startInstantMs,
+      endInstantMs,
     };
+  }
+
+  formatLocalDateTime(year, month, day, hour, minute) {
+    const y = String(year).padStart(4, '0');
+    const m = String(month).padStart(2, '0');
+    const d = String(day).padStart(2, '0');
+    const h = String(hour).padStart(2, '0');
+    const min = String(minute).padStart(2, '0');
+    return `${y}-${m}-${d}T${h}:${min}:00`;
+  }
+
+  getDateTimePartsInTimeZone(input, timeZone) {
+    const date = input instanceof Date ? input : new Date(input);
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(date);
+    const byType = {};
+    for (const part of parts) {
+      if (part.type !== 'literal') {
+        byType[part.type] = part.value;
+      }
+    }
+    return {
+      year: Number(byType.year),
+      month: Number(byType.month),
+      day: Number(byType.day),
+      hour: Number(byType.hour),
+      minute: Number(byType.minute),
+      second: Number(byType.second),
+    };
+  }
+
+  getTimeZoneOffsetMs(instantMs, timeZone) {
+    const date = new Date(instantMs);
+    const parts = this.getDateTimePartsInTimeZone(date, timeZone);
+    const asUtc = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second
+    );
+    return asUtc - instantMs;
+  }
+
+  convertLocalDateTimeToInstantMs(year, month, day, hour, minute, timeZone) {
+    const utcGuess = Date.UTC(year, month - 1, day, hour, minute, 0);
+    let instant = utcGuess;
+
+    for (let i = 0; i < 2; i += 1) {
+      const offset = this.getTimeZoneOffsetMs(instant, timeZone);
+      instant = utcGuess - offset;
+    }
+
+    return instant;
   }
 
   /**
@@ -106,20 +192,26 @@ class GoogleCalendarService {
   /**
    * Check if a time slot is available (no conflicts)
    */
-  async checkAvailability(date, time, duration = 60) {
+  async checkAvailability(date, time, duration = 60, timeZone = this.defaultTimezone) {
     try {
-      const { startDateTime, endDateTime } = this.calculateEventTimes(date, time, duration);
+      const { startInstantMs, endInstantMs } = this.calculateEventTimes(
+        date,
+        time,
+        duration,
+        timeZone
+      );
 
       const response = await this.calendar.freebusy.query({
         requestBody: {
-          timeMin: startDateTime,
-          timeMax: endDateTime,
+          timeMin: new Date(startInstantMs).toISOString(),
+          timeMax: new Date(endInstantMs).toISOString(),
+          timeZone,
           items: [{ id: this.calendarId }],
         },
       });
 
       const calendars = response.data.calendars;
-      if (!calendars) return true;
+      if (!calendars || !calendars[this.calendarId]) return false;
 
       const busy = calendars[this.calendarId]?.busy || [];
       return busy.length === 0;
@@ -132,12 +224,12 @@ class GoogleCalendarService {
   /**
    * Get available time slots for a given date
    */
-  async getAvailableSlots(date, timePreference = 'any') {
+  async getAvailableSlots(date, timePreference = 'any', timeZone = this.defaultTimezone) {
     const slots = this.generateTimeSlots(timePreference);
     const availableSlots = [];
 
     for (const slot of slots) {
-      const isAvailable = await this.checkAvailability(date, slot);
+      const isAvailable = await this.checkAvailability(date, slot, 60, timeZone);
       if (isAvailable) {
         availableSlots.push(slot);
       }
@@ -161,19 +253,22 @@ class GoogleCalendarService {
       const { startDateTime, endDateTime } = this.calculateEventTimes(
         params.date,
         params.time,
-        parseInt(params.duration || '60')
+        parseInt(params.duration || '60', 10),
+        params.timezone || this.defaultTimezone
       );
+
+      const eventTimeZone = params.timezone || this.defaultTimezone;
 
       const event = {
         summary: `Demo with ${params.leadName}${params.company ? ` - ${params.company}` : ''}`,
         description: this.buildEventDescription(params),
         start: {
           dateTime: startDateTime,
-          timeZone: params.timezone || 'Asia/Kolkata',
+          timeZone: eventTimeZone,
         },
         end: {
           dateTime: endDateTime,
-          timeZone: params.timezone || 'Asia/Kolkata',
+          timeZone: eventTimeZone,
         },
         reminders: {
           useDefault: false,
