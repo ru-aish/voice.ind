@@ -185,18 +185,19 @@ export default function VersionFive() {
         return () => observerRef.current?.disconnect();
     }, []);
 
-    const testimonials = [
-        {
-            name: "Rajesh Mehta",
-            role: "CEO, TechScale Solutions",
-            quote: "We were losing 40% of leads because nobody picked up calls after hours. Ab har call attend hoti hai, and bookings are up 67%. Total game changer for our business.",
-            metric: "67% more conversions",
-            image: "/images/testimonials/michael.png"
-        },
-        {
-                            top: `${Math.random() * 100}%`,
-                            animationDelay: `${Math.random() * 20}s`,
-                            animationDuration: `${20 + Math.random() * 30}s`
+    return (
+        <div className={styles.container}>
+            {/* Floating Particles */}
+            <div className={styles.particles}>
+                {[...Array(30)].map((_, i) => (
+                    <div
+                        key={i}
+                        className={styles.particle}
+                        style={{
+                            left: `${(i * 3.33) % 100}%`,
+                            top: `${(i * 7.77) % 100}%`,
+                            animationDelay: `${i * 0.5}s`,
+                            animationDuration: `${20 + (i % 10)}s`
                         }}
                     />
                 ))}
@@ -268,6 +269,7 @@ export default function VersionFive() {
                     </div>
 
                     <div className={styles.trustBadges}>
+                        {/* TODO: Add trust badges (ratings, certifications) */}
                     </div>
                 </div>
 
@@ -280,7 +282,7 @@ export default function VersionFive() {
                                     key={i}
                                     className={styles.waveBar}
                                     style={{
-                                        height: `${20 + Math.sin(i * 0.5) * 30 + Math.random() * 20}px`,
+                                        height: `${20 + Math.sin(i * 0.5) * 30 + (i % 5) * 4}px`,
                                         animationDelay: `${i * 0.05}s`
                                     }}
                                 />
@@ -777,7 +779,7 @@ export default function VersionFive() {
 
             {/* Footer */}
             <footer className={styles.footer}>
-                <p>&copy; 2025 ElevixAI. All rights reserved.</p>
+                <p>&copy; 2026 ElevixAI. All rights reserved.</p>
             </footer>
         </div>
     );
