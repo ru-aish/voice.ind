@@ -646,14 +646,6 @@
 }
 
 /* Calculator */
-.calculator {
-    background: linear-gradient(145deg, rgba(18, 18, 18, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 20px;
-    padding: 1.5rem;
-    box-shadow: 0 25px 80px rgba(0, 0, 0, 0.5);
-}
-
 .calcTitle {
     font-size: 1rem;
     font-weight: 600;

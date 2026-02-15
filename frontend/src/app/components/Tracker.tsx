@@ -35,22 +35,22 @@ interface QueuedAction {
     extra?: string;      // Optional extra data
 }
 
-let actionQueue: QueuedAction[] = [];
-
-// Session start time (milliseconds)
-let sessionStartTime: number = 0;
-
-// Track if session_start has been sent
-let sessionStartSent = false;
+// Singleton state to prevent issues with React Strict Mode and HMR
+const trackerState = {
+    trackerState.actionQueue: [] as QueuedAction[],
+    trackerState.sessionStartTime: 0,
+    trackerState.sessionStartSent: false,
+    isInitialized: false
+};
 
 /**
  * Get current timestamp in milliseconds since session start
  */
 function getTimestamp(): number {
-    if (!sessionStartTime) {
-        sessionStartTime = Date.now();
+    if (!trackerState.sessionStartTime) {
+        trackerState.sessionStartTime = Date.now();
     }
-    return Date.now() - sessionStartTime;
+    return Date.now() - trackerState.sessionStartTime;
 }
 
 /**
@@ -101,7 +101,7 @@ function formatTime(ms: number): string {
 function queueAction(action: string, extra?: string) {
     const t_ms = getTimestamp();
     
-    actionQueue.push({
+    trackerState.actionQueue.push({
         action,
         t_ms,
         extra
@@ -133,27 +133,27 @@ export function Tracker() {
 
     // Flush action queue
     const flushActions = useCallback(async () => {
-        if (actionQueue.length === 0) return;
+        if (trackerState.actionQueue.length === 0) return;
         
-        const actionsToSend = [...actionQueue];
-        actionQueue = [];
+        const actionsToSend = [...trackerState.actionQueue];
+        trackerState.actionQueue = [];
         
         const success = await sendActions(actionsToSend);
         if (!success) {
             // Re-queue failed actions
-            actionQueue = [...actionsToSend, ...actionQueue];
+            trackerState.actionQueue = [...actionsToSend, ...trackerState.actionQueue];
         }
     }, []);
 
     useEffect(() => {
         // Initialize session
-        sessionStartTime = Date.now();
-        sessionStartSent = false;
+        trackerState.sessionStartTime = Date.now();
+        trackerState.sessionStartSent = false;
 
         // Record session start
-        if (!sessionStartSent) {
+        if (!trackerState.sessionStartSent) {
             queueAction('session_start');
-            sessionStartSent = true;
+            trackerState.sessionStartSent = true;
         }
 
         // ========================================
@@ -307,10 +307,10 @@ export function Tracker() {
             queueAction('session_end');
             
             // Use sendBeacon for reliable delivery on page exit
-            if (actionQueue.length > 0 && navigator.sendBeacon) {
+            if (trackerState.actionQueue.length > 0 && navigator.sendBeacon) {
                 navigator.sendBeacon(
                     TRACKING_ENDPOINT,
-                    JSON.stringify({ actions: actionQueue })
+                    JSON.stringify({ actions: trackerState.actionQueue })
                 );
             }
         };
@@ -344,8 +344,12 @@ export function Tracker() {
                 sectionObserver.disconnect();
             }
 
-            // Flush remaining actions
-            flushActions();
+            // Synchronous flush for unmount (can't use async in cleanup)
+            if (trackerState.actionQueue.length > 0 && typeof navigator !== 'undefined' && navigator.sendBeacon) {
+                const data = JSON.stringify({ actions: trackerState.actionQueue });
+                navigator.sendBeacon(TRACKING_ENDPOINT, data);
+                trackerState.actionQueue = [];
+            }
         };
     }, [flushActions]);
 
