@@ -269,6 +269,12 @@ function loadConfig() {
         resolvedSharedPrompt ||
         DEFAULTS.cerebras.systemPrompt,
     },
+
+    tools: {
+      enabled: parseBool(process.env.VOICE_TOOLS_ENABLED, DEFAULTS.tools.enabled),
+      maxIterations: parseNum(process.env.VOICE_TOOLS_MAX_ITERATIONS, DEFAULTS.tools.maxIterations),
+      apiBaseUrl: process.env.VOICE_TOOLS_API_BASE_URL || DEFAULTS.tools.apiBaseUrl
+    },
   };
 }
 

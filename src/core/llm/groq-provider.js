@@ -27,7 +27,7 @@ class GroqProvider extends LlmProvider {
     this.client = new Groq({ apiKey: config.apiKey });
   }
 
-  async streamText({ prompt, messages, abortSignal, onToken, onFirstToken }) {
+  async streamText({ prompt, messages, abortSignal, onToken, onFirstToken, tools, onToolCall }) {
     if (!prompt || !String(prompt).trim()) {
       throw new Error('Prompt is empty');
     }
@@ -43,7 +43,10 @@ class GroqProvider extends LlmProvider {
       streamCompletedAtMs: null,
       generatedText: '',
       finishReason: null,
+      toolCalls: [],
     };
+
+    const accumulatedToolCalls = new Map();
 
     const throwIfAborted = () => {
       if (abortSignal?.aborted) {
@@ -71,6 +74,10 @@ class GroqProvider extends LlmProvider {
       stop: this.config.stop,
     };
 
+    if (tools && tools.length > 0) {
+      requestPayload.tools = tools;
+    }
+
     if (isReasoningModel(this.config.model)) {
       requestPayload.reasoning_effort = this.config.reasoningEffort;
     }
@@ -85,25 +92,65 @@ class GroqProvider extends LlmProvider {
       }
       const extracted = extractDeltaText(chunk, this.config.allowReasoningFallback);
       const tokenText = extracted.text;
-      if (!tokenText) continue;
 
-      if (!metrics.firstTokenAtMs) {
+      if (!metrics.firstTokenAtMs && (tokenText || choice?.delta?.tool_calls)) {
         metrics.firstTokenAtMs = Date.now();
-        metrics.firstTokenSource = extracted.source;
+        metrics.firstTokenSource = extracted.source || 'tool_call';
         if (onFirstToken) {
           await onFirstToken({
             atMs: metrics.firstTokenAtMs,
-            source: extracted.source,
-            text: tokenText,
+            source: metrics.firstTokenSource,
+            text: tokenText || '',
           });
         }
       }
 
-      metrics.generatedText += tokenText;
-      metrics.tokenCountApprox += countTokensApprox(tokenText);
+      if (tokenText) {
+        metrics.generatedText += tokenText;
+        metrics.tokenCountApprox += countTokensApprox(tokenText);
 
-      if (onToken) {
-        await onToken(tokenText);
+        if (onToken) {
+          await onToken(tokenText);
+        }
+      }
+
+      const delta = choice?.delta;
+      if (delta?.tool_calls) {
+        for (const toolCallDelta of delta.tool_calls) {
+          const index = toolCallDelta.index;
+          let accumulated = accumulatedToolCalls.get(index);
+
+          if (!accumulated) {
+            accumulated = {
+              id: toolCallDelta.id || '',
+              type: toolCallDelta.type || 'function',
+              function: {
+                name: toolCallDelta.function?.name || '',
+                arguments: '',
+              },
+            };
+            accumulatedToolCalls.set(index, accumulated);
+          }
+
+          if (toolCallDelta.id) {
+            accumulated.id = toolCallDelta.id;
+          }
+          if (toolCallDelta.function?.name) {
+            accumulated.function.name = toolCallDelta.function.name;
+          }
+          if (toolCallDelta.function?.arguments) {
+            accumulated.function.arguments += toolCallDelta.function.arguments;
+          }
+        }
+      }
+    }
+
+    if (accumulatedToolCalls.size > 0 && onToolCall) {
+      const sortedIndices = [...accumulatedToolCalls.keys()].sort((a, b) => a - b);
+      for (const index of sortedIndices) {
+        const toolCall = accumulatedToolCalls.get(index);
+        metrics.toolCalls.push(toolCall);
+        await onToolCall(toolCall);
       }
     }
 
@@ -115,8 +162,8 @@ class GroqProvider extends LlmProvider {
       );
     }
 
-    if (!metrics.generatedText.trim()) {
-      throw new Error('Groq stream produced no assistant text');
+    if (!metrics.generatedText.trim() && metrics.toolCalls.length === 0) {
+      throw new Error('Groq stream produced no assistant text or tool calls');
     }
 
     return metrics;

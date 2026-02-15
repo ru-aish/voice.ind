@@ -89,6 +89,12 @@ const DEFAULTS = {
     allowReasoningFallback: false,
     systemPrompt: '',
   },
+
+  tools: {
+    enabled: true,
+    maxIterations: 3,
+    apiBaseUrl: 'http://localhost:3002',
+  },
 };
 
 const VAD_SIGNALS = {
@@ -106,6 +112,8 @@ const WS_MESSAGE_TYPES = {
   ERROR: 'error',
   VAD: 'vad',
   READY: 'ready',
+  TOOL_CALL: 'tool_call',
+  TOOL_RESULT: 'tool_result',
 };
 
 module.exports = {
