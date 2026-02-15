@@ -93,7 +93,6 @@ const DEFAULTS = {
   tools: {
     enabled: true,
     maxIterations: 3,
-    apiBaseUrl: 'http://localhost:3002',
   },
 };
 

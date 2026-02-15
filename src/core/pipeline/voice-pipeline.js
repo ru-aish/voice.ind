@@ -211,7 +211,7 @@ class VoicePipeline extends EventEmitter {
     this.vad = new VadHandler();
     this.bargeIn = new BargeInHandler();
 
-    this.toolExecutor = new ToolExecutor({ apiBaseUrl: this.config.tools?.apiBaseUrl });
+    this.toolExecutor = new ToolExecutor();
 
     this.sttClient = null;
     this.ttsClient = null;
