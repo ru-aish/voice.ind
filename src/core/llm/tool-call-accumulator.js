@@ -26,7 +26,7 @@ function accumulateToolCallDelta(accumulatedToolCalls, toolCallDelta) {
 }
 
 async function flushAccumulatedToolCalls(accumulatedToolCalls, metrics, onToolCall) {
-  if (!onToolCall || accumulatedToolCalls.size === 0) {
+  if (accumulatedToolCalls.size === 0) {
     return;
   }
 
@@ -34,7 +34,9 @@ async function flushAccumulatedToolCalls(accumulatedToolCalls, metrics, onToolCa
   for (const index of sortedIndices) {
     const toolCall = accumulatedToolCalls.get(index);
     metrics.toolCalls.push(toolCall);
-    await onToolCall(toolCall);
+    if (onToolCall) {
+      await onToolCall(toolCall);
+    }
   }
 }
 

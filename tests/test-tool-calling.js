@@ -8,14 +8,25 @@ function printResult(testName, result) {
   console.log(JSON.stringify(result, null, 2));
 }
 
+function getFutureDate(daysAhead = 2) {
+  const date = new Date();
+  date.setDate(date.getDate() + daysAhead);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 async function runTests() {
   console.log('Tool Calling Tests\n');
   console.log('Available tools:', toolDefinitions.map(t => t.function?.name).join(', '));
   console.log('API Base URL: http://localhost:3002\n');
+  const testDate = getFutureDate(2);
+  console.log('Using test date:', testDate);
 
   console.log('--- Test 1: check_availability ---');
   const availabilityResult = await executor.execute('check_availability', {
-    date: '2026-02-20',
+    date: testDate,
     timePreference: 'morning'
   });
   printResult('check_availability result', availabilityResult);
@@ -26,7 +37,7 @@ async function runTests() {
     email: 'test@example.com',
     phone: '+1-555-1234',
     company: 'Test Company',
-    date: '2026-02-20',
+    date: testDate,
     time: '10:00',
     duration: '30',
     notes: 'Test booking from automated test'
