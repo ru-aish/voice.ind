@@ -1,4 +1,7 @@
-const captureLeadInfo = {
+// Tool definitions in OpenAI function calling format
+// Each tool must have: type: "function", function: { name, description, parameters }
+
+const captureLeadInfoDef = {
   name: "capture_lead_info",
   description: "Captures contact information from a potential customer. Use when customer provides name, email, phone, or company.",
   parameters: {
@@ -14,20 +17,20 @@ const captureLeadInfo = {
   }
 };
 
-const checkAvailability = {
+const checkAvailabilityDef = {
   name: "check_availability",
   description: "Check available time slots for scheduling a demo. Use when customer asks about available times.",
   parameters: {
     type: "object",
     properties: {
       date: { type: "string", description: "Date in YYYY-MM-DD format" },
-      timePreference: { type: "string", enum: ["morning", "afternoon", "evening", "any"] }
+      timePreference: { type: "string", enum: ["morning", "afternoon", "evening", "any"], description: "Preferred time of day" }
     },
     required: []
   }
 };
 
-const bookDemo = {
+const bookDemoDef = {
   name: "book_demo",
   description: "Book a demo appointment. Use after confirming customer wants to schedule at a specific time.",
   parameters: {
@@ -39,16 +42,25 @@ const bookDemo = {
       company: { type: "string", description: "Company name" },
       date: { type: "string", description: "Date in YYYY-MM-DD format" },
       time: { type: "string", description: "Time in HH:MM format (24-hour)" },
-      duration: { type: "string", enum: ["30", "60", "90"] },
+      duration: { type: "string", enum: ["30", "60", "90"], description: "Duration in minutes" },
       notes: { type: "string", description: "Special requests" }
     },
     required: ["leadName", "email", "date", "time"]
   }
 };
 
+// Wrap in OpenAI function calling format
+const captureLeadInfo = { type: "function", function: captureLeadInfoDef };
+const checkAvailability = { type: "function", function: checkAvailabilityDef };
+const bookDemo = { type: "function", function: bookDemoDef };
+
 module.exports = {
   toolDefinitions: [captureLeadInfo, checkAvailability, bookDemo],
-  toolMap: { capture_lead_info: captureLeadInfo, check_availability: checkAvailability, book_demo: bookDemo },
+  toolMap: { 
+    capture_lead_info: captureLeadInfo, 
+    check_availability: checkAvailability, 
+    book_demo: bookDemo 
+  },
   captureLeadInfo,
   checkAvailability,
   bookDemo
