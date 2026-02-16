@@ -1,52 +1,44 @@
-const PUNCTUATION_REGEX = /[.!?\n।॥,;:]/;
-const SENTENCE_END_REGEX = /[.!?\n।॥]/;
+const TERMINATOR_REGEX = /[.!?|।॥\n]$/;
+const SPLIT_REGEX = /([.!?|।॥\n]+)/;
 
 function extractLineChunks(bufferText, maxChars) {
   const chunks = [];
-  let text = String(bufferText || '');
+  let text = String(bufferText || '').trim();
+  if (!text) return { chunks, remaining: '' };
 
-  while (text.length > 0) {
-    const newlineIdx = text.indexOf('\n');
-    if (newlineIdx >= 0) {
-      const candidate = text.slice(0, newlineIdx + 1).trim();
-      text = text.slice(newlineIdx + 1);
+  const parts = text.split(SPLIT_REGEX);
+  let buffer = '';
+
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i];
+    if (!part) continue;
+
+    buffer += part;
+
+    if (TERMINATOR_REGEX.test(buffer)) {
+      const candidate = buffer.replace(/\n+/g, ' ').trim();
       if (candidate) chunks.push(candidate);
+      buffer = '';
       continue;
     }
 
-    let punctIdx = -1;
-    for (let i = 0; i < text.length; i += 1) {
-      if (PUNCTUATION_REGEX.test(text[i])) {
-        punctIdx = i;
-        break;
+    if (buffer.length >= maxChars) {
+      let splitIdx = -1;
+      for (let j = buffer.length - 1; j >= 0; j -= 1) {
+        const ch = buffer[j];
+        if (ch === ' ' || ch === ',') {
+          splitIdx = j + 1;
+          break;
+        }
       }
-    }
-
-    if (punctIdx >= 0 && punctIdx + 1 <= maxChars) {
-      const candidate = text.slice(0, punctIdx + 1).trim();
-      text = text.slice(punctIdx + 1);
+      if (splitIdx <= 0) splitIdx = Math.min(maxChars, buffer.length);
+      const candidate = buffer.slice(0, splitIdx).trim();
+      buffer = buffer.slice(splitIdx).trimStart();
       if (candidate) chunks.push(candidate);
-      continue;
     }
-
-    if (text.length <= maxChars) break;
-
-    let splitIdx = -1;
-    for (let i = Math.min(maxChars - 1, text.length - 1); i >= 0; i -= 1) {
-      const ch = text[i];
-      if (ch === ' ' || PUNCTUATION_REGEX.test(ch)) {
-        splitIdx = i + 1;
-        break;
-      }
-    }
-
-    if (splitIdx <= 0) splitIdx = maxChars;
-    const candidate = text.slice(0, splitIdx).trim();
-    text = text.slice(splitIdx);
-    if (candidate) chunks.push(candidate);
   }
 
-  return { chunks, remaining: text };
+  return { chunks, remaining: buffer };
 }
 
 module.exports = {

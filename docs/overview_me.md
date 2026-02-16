@@ -1,0 +1,6 @@
+- sarvam stt -> groq model -> tts 
+- sending small chunk of input to the stt and tts for best letency in wav dec. So this comes with problem which is there is no emotions or no stoping at the ?,. kind of symball(unsolved)
+- since it is in small parts it comes with problem which is numbers are littraly numbers and it is super annoying -> current solution ask ai everythings in words
+- tool call takes more time -> (unsolved -> propossed solution have database in the backend that will get the calender entry and then it will update the calender every hr and i can get the data updated at time of update)
+- native tool calles and that is going super good with models
+- models are not good at speaking in other languages 

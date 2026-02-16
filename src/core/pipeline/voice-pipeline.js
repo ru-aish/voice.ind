@@ -828,9 +828,12 @@ class VoicePipeline extends EventEmitter {
     turn.status = 'interrupted';
     turn.interruptedAtMs = Date.now();
     const spokenPartial = String(turn.assistantSpokenText || '').trim();
+    const generatedPartial = String(turn.assistantGeneratedText || '').trim();
     this.#ensureUserHistory(turn);
     if (spokenPartial) {
       this.#upsertAssistantHistory(turn, spokenPartial, true);
+    } else if (generatedPartial) {
+      this.#upsertAssistantHistory(turn, generatedPartial, true);
     }
     this.emit('metrics', {
       type: 'turn_interrupted_context_saved',
@@ -838,6 +841,8 @@ class VoicePipeline extends EventEmitter {
       reason,
       hasSpokenPartial: Boolean(spokenPartial),
       spokenPartialChars: spokenPartial.length,
+      hasGeneratedPartial: Boolean(generatedPartial),
+      generatedPartialChars: generatedPartial.length,
       contextTurns: this.#currentContextTurns(),
     });
     this.turnStates.delete(requestId);
@@ -1233,6 +1238,10 @@ class VoicePipeline extends EventEmitter {
           });
           return;
         }
+
+        // Generic provider errors (network, timeout, etc.)
+        // Finalize as interrupted to preserve user prompt in conversation context
+        this.#finalizeInterruptedTurn(requestId, 'provider_error');
 
         this.emit('error', {
           error: `provider_error request=${requestId} provider=${provider} message=${err?.message || err}`,

@@ -75,10 +75,14 @@ let stopping = false;
 let streamStarted = false;
 let activeRequestId = null;
 let speakerRestartPending = false;
+let speakerReady = false;
+let pendingAudioBuffers = [];
+let speakerReadyTimer = null;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
 const droppedRequestIds = new Set();
 const WAV_HEADER_SIZE = 44;
+const SPEAKER_STARTUP_MS = 80;
 
 function nowIso() {
   return new Date().toISOString();
@@ -94,11 +98,28 @@ function vlog(line) {
   }
 }
 
+function flushPendingAudio() {
+  if (!speaker || !speaker.stdin || speaker.stdin.destroyed) return;
+  for (const buf of pendingAudioBuffers) {
+    try {
+      speaker.stdin.write(buf);
+    } catch {}
+  }
+  pendingAudioBuffers = [];
+}
+
 function startSpeaker() {
   if (!ENABLE_SPEAKER) return;
   if (speaker) return;
   if (speakerRestartPending) return;
+  speakerReady = false;
+  pendingAudioBuffers = [];
   speaker = spawn('aplay', ['-q', '-D', SPEAKER_DEVICE, '-t', 'raw', '-f', 'S16_LE', '-c', '1', '-r', String(TTS_SAMPLE_RATE)], { stdio: ['pipe', 'ignore', 'pipe'] });
+  // Give aplay time to initialize its ALSA buffers before writing audio
+  speakerReadyTimer = setTimeout(() => {
+    speakerReady = true;
+    flushPendingAudio();
+  }, SPEAKER_STARTUP_MS);
   speaker.stderr.on('data', (d) => {
     const line = d.toString().trim();
     if (!line) return;
@@ -128,6 +149,12 @@ function startSpeaker() {
 }
 
 function stopSpeaker(immediate = false) {
+  if (speakerReadyTimer) {
+    clearTimeout(speakerReadyTimer);
+    speakerReadyTimer = null;
+  }
+  speakerReady = false;
+  pendingAudioBuffers = [];
   if (!speaker) return;
   try {
     if (speaker.stdin && !speaker.stdin.destroyed) {
@@ -270,7 +297,11 @@ function handleServerMessage(raw) {
     try {
       const rawBuffer = Buffer.from(data.audio, 'base64');
       const pcmBuffer = stripWavHeader(rawBuffer);
-      speaker.stdin.write(pcmBuffer);
+      if (speakerReady) {
+        speaker.stdin.write(pcmBuffer);
+      } else {
+        pendingAudioBuffers.push(pcmBuffer);
+      }
     } catch (err) {
       const code = String(err?.code || '');
       if (code !== 'EPIPE' && code !== 'ERR_STREAM_DESTROYED') {
