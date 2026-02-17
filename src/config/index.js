@@ -104,9 +104,7 @@ function loadConfig() {
       provider:
         (process.env.DEFAULT_PROVIDER || process.env.VOICE_PIPELINE_PROVIDER || DEFAULTS.llm.provider)
           .trim()
-          .toLowerCase() === 'cerebras'
-          ? 'cerebras'
-          : 'groq',
+          .toLowerCase(),
     },
 
     bridge: {
@@ -268,6 +266,24 @@ function loadConfig() {
         String(cerebrasPromptRaw || '').trim() ||
         resolvedSharedPrompt ||
         DEFAULTS.cerebras.systemPrompt,
+    },
+
+    sarvam: {
+      model: process.env.SARVAM_LLM_MODEL || DEFAULTS.sarvam.model,
+      temperature: parseNum(
+        process.env.SARVAM_LLM_TEMPERATURE,
+        DEFAULTS.sarvam.temperature
+      ),
+      maxCompletionTokens: parseNum(
+        process.env.SARVAM_LLM_MAX_TOKENS,
+        DEFAULTS.sarvam.maxCompletionTokens
+      ),
+      topP: parseNum(process.env.SARVAM_LLM_TOP_P, DEFAULTS.sarvam.topP),
+      stop: parseStopValue(process.env.SARVAM_LLM_STOP, DEFAULTS.sarvam.stop),
+      systemPrompt:
+        String(process.env.SARVAM_LLM_SYSTEM_PROMPT || '').trim() ||
+        resolvedSharedPrompt ||
+        DEFAULTS.sarvam.systemPrompt,
     },
 
     tools: {

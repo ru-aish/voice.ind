@@ -16,6 +16,7 @@ const { VadHandler } = require('../stt/vad-handler');
 
 const { GroqProvider } = require('../llm/groq-provider');
 const { CerebrasProvider } = require('../llm/cerebras-provider');
+const { SarvamProvider } = require('../llm/sarvam-provider');
 const { countTokensApprox } = require('../llm/types');
 
 const { SarvamTtsClient } = require('../tts/sarvam-tts-client');
@@ -465,7 +466,7 @@ class VoicePipeline extends EventEmitter {
       return Math.round(parsed);
     };
 
-    if (next.provider && ['groq', 'cerebras'].includes(String(next.provider).toLowerCase())) {
+    if (next.provider && ['groq', 'cerebras', 'sarvam'].includes(String(next.provider).toLowerCase())) {
       this.activeProvider = String(next.provider).toLowerCase();
     }
 
@@ -795,7 +796,8 @@ class VoicePipeline extends EventEmitter {
   }
 
   #getProvider(providerName) {
-    const normalized = providerName === 'cerebras' ? 'cerebras' : 'groq';
+    const validProviders = ['cerebras', 'groq', 'sarvam'];
+    const normalized = validProviders.includes(providerName) ? providerName : 'groq';
     if (this.providers.has(normalized)) {
       return this.providers.get(normalized);
     }
@@ -812,6 +814,16 @@ class VoicePipeline extends EventEmitter {
         stop: this.config.cerebras.stop,
         allowReasoningFallback: this.config.cerebras.allowReasoningFallback,
         systemPrompt: this.config.cerebras.systemPrompt,
+      });
+    } else if (normalized === 'sarvam') {
+      provider = new SarvamProvider({
+        apiKey: this.config.keys.sarvamApiKey,
+        model: this.config.sarvam.model,
+        temperature: this.config.sarvam.temperature,
+        maxCompletionTokens: this.config.sarvam.maxCompletionTokens,
+        topP: this.config.sarvam.topP,
+        stop: this.config.sarvam.stop,
+        systemPrompt: this.config.sarvam.systemPrompt,
       });
     } else {
       provider = new GroqProvider({
@@ -1000,10 +1012,14 @@ class VoicePipeline extends EventEmitter {
   #buildContextMessages(prompt) {
     const messages = [];
     const providerName = this.activeProvider;
-    const baseSystemPrompt =
-      providerName === 'cerebras'
-        ? this.config.cerebras.systemPrompt
-        : this.config.groq.systemPrompt;
+    let baseSystemPrompt;
+    if (providerName === 'cerebras') {
+      baseSystemPrompt = this.config.cerebras.systemPrompt;
+    } else if (providerName === 'sarvam') {
+      baseSystemPrompt = this.config.sarvam.systemPrompt;
+    } else {
+      baseSystemPrompt = this.config.groq.systemPrompt;
+    }
     const languageInstruction = buildLanguageConstraintInstruction(this.config.tts.languageCode);
 
     const systemParts = [];
