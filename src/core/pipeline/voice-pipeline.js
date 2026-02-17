@@ -326,8 +326,11 @@ class VoicePipeline extends EventEmitter {
     const greetingRequestId = 0;
 
     try {
+      const greetingPromptText = String(
+        messages.find((m) => String(m?.role || '').toLowerCase() === 'user')?.content || ''
+      ).trim();
       await provider.streamText({
-        prompt: greetingPrompt,
+        prompt: greetingPromptText || null,
         messages,
         abortSignal: null,
         tools: undefined,
