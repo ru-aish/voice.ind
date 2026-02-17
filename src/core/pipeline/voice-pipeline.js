@@ -17,6 +17,7 @@ const { VadHandler } = require('../stt/vad-handler');
 const { GroqProvider } = require('../llm/groq-provider');
 const { CerebrasProvider } = require('../llm/cerebras-provider');
 const { SarvamProvider } = require('../llm/sarvam-provider');
+const { GeminiProvider } = require('../llm/gemini-provider');
 const { countTokensApprox } = require('../llm/types');
 
 const { SarvamTtsClient } = require('../tts/sarvam-tts-client');
@@ -283,10 +284,14 @@ class VoicePipeline extends EventEmitter {
 
     // Build messages with system prompt and greeting instruction
     const providerName = this.activeProvider;
-    const baseSystemPrompt =
-      providerName === 'cerebras'
-        ? this.config.cerebras.systemPrompt
-        : this.config.groq.systemPrompt;
+    let baseSystemPrompt = this.config.groq.systemPrompt;
+    if (providerName === 'cerebras') {
+      baseSystemPrompt = this.config.cerebras.systemPrompt;
+    } else if (providerName === 'sarvam') {
+      baseSystemPrompt = this.config.sarvam.systemPrompt;
+    } else if (providerName === 'gemini') {
+      baseSystemPrompt = this.config.gemini.systemPrompt;
+    }
     const languageInstruction = buildLanguageConstraintInstruction(this.config.tts.languageCode);
 
     const systemParts = [];
@@ -315,11 +320,12 @@ class VoicePipeline extends EventEmitter {
     const tts = await this.#ensureTtsClient();
 
     let bufferedText = '';
+    let generatedGreetingText = '';
     const greetingRequestId = 0;
 
     try {
       await provider.streamText({
-        prompt: null,
+        prompt: greetingPrompt,
         messages,
         abortSignal: null,
         tools: undefined,
@@ -331,6 +337,7 @@ class VoicePipeline extends EventEmitter {
           });
         },
         onToken: async (tokenText) => {
+          generatedGreetingText += tokenText;
           bufferedText += tokenText;
 
           // Split into sentences and send to TTS
@@ -389,13 +396,36 @@ class VoicePipeline extends EventEmitter {
         }
       }
 
-      // Add greeting to conversation history
-      const greetingText = messages[1]?.content;
-      if (greetingText) {
+      const spokenGreeting = String(generatedGreetingText || '').trim();
+      if (spokenGreeting) {
+        this.emit('transcript', {
+          text: spokenGreeting,
+          isFinal: true,
+          segmentIndex: 0,
+          speechActive: false,
+        });
+      }
+
+      // Add greeting exchange to conversation history so the model keeps greeting context.
+      if (spokenGreeting) {
+        const greetingPromptText = String(
+          messages.find((m) => String(m?.role || '').toLowerCase() === 'user')?.content || ''
+        ).trim();
+        this.conversationHistory.push({
+          role: 'user',
+          content: greetingPromptText || 'Please greet the user briefly.',
+          turnId: -1,
+          requestId: 0,
+          interrupted: false,
+          timestampMs: Date.now(),
+          isGreeting: true,
+        });
         this.conversationHistory.push({
           role: 'assistant',
-          content: greetingText,
-          turnId: 0,
+          content: spokenGreeting,
+          turnId: -1,
+          requestId: 0,
+          interrupted: false,
           timestampMs: Date.now(),
           isGreeting: true,
         });
@@ -466,7 +496,7 @@ class VoicePipeline extends EventEmitter {
       return Math.round(parsed);
     };
 
-    if (next.provider && ['groq', 'cerebras', 'sarvam'].includes(String(next.provider).toLowerCase())) {
+    if (next.provider && ['groq', 'cerebras', 'sarvam', 'gemini'].includes(String(next.provider).toLowerCase())) {
       this.activeProvider = String(next.provider).toLowerCase();
     }
 
@@ -536,6 +566,7 @@ class VoicePipeline extends EventEmitter {
         this.config.groq.systemPrompt = promptText;
         this.config.cerebras.systemPrompt = promptText;
         this.config.sarvam.systemPrompt = promptText;
+        this.config.gemini.systemPrompt = promptText;
       }
     }
 
@@ -544,6 +575,11 @@ class VoicePipeline extends EventEmitter {
       if (this.activeProvider === 'cerebras') {
         if (this.config.cerebras.model !== model) {
           this.config.cerebras.model = model;
+          llmConfigChanged = true;
+        }
+      } else if (this.activeProvider === 'gemini') {
+        if (this.config.gemini.model !== model) {
+          this.config.gemini.model = model;
           llmConfigChanged = true;
         }
       } else if (this.activeProvider === 'sarvam') {
@@ -581,11 +617,24 @@ class VoicePipeline extends EventEmitter {
       }
     }
 
+    if (next.geminiModel && String(next.geminiModel).trim()) {
+      const model = String(next.geminiModel).trim();
+      if (this.config.gemini.model !== model) {
+        this.config.gemini.model = model;
+        llmConfigChanged = true;
+      }
+    }
+
     const activeTemperature = parseBounded(next.temperature, 0, 2);
     if (activeTemperature !== null) {
       if (this.activeProvider === 'cerebras') {
         if (this.config.cerebras.temperature !== activeTemperature) {
           this.config.cerebras.temperature = activeTemperature;
+          llmConfigChanged = true;
+        }
+      } else if (this.activeProvider === 'gemini') {
+        if (this.config.gemini.temperature !== activeTemperature) {
+          this.config.gemini.temperature = activeTemperature;
           llmConfigChanged = true;
         }
       } else if (this.activeProvider === 'sarvam') {
@@ -617,6 +666,12 @@ class VoicePipeline extends EventEmitter {
       llmConfigChanged = true;
     }
 
+    const geminiTemperature = parseBounded(next.geminiTemperature, 0, 2);
+    if (geminiTemperature !== null && this.config.gemini.temperature !== geminiTemperature) {
+      this.config.gemini.temperature = geminiTemperature;
+      llmConfigChanged = true;
+    }
+
     const activeMaxTokens = parseBoundedInt(
       next.maxCompletionTokens ?? next.maxTokens,
       32,
@@ -626,6 +681,11 @@ class VoicePipeline extends EventEmitter {
       if (this.activeProvider === 'cerebras') {
         if (this.config.cerebras.maxCompletionTokens !== activeMaxTokens) {
           this.config.cerebras.maxCompletionTokens = activeMaxTokens;
+          llmConfigChanged = true;
+        }
+      } else if (this.activeProvider === 'gemini') {
+        if (this.config.gemini.maxCompletionTokens !== activeMaxTokens) {
+          this.config.gemini.maxCompletionTokens = activeMaxTokens;
           llmConfigChanged = true;
         }
       } else if (this.activeProvider === 'sarvam') {
@@ -663,6 +723,15 @@ class VoicePipeline extends EventEmitter {
       llmConfigChanged = true;
     }
 
+    const geminiMaxTokens = parseBoundedInt(next.geminiMaxTokens, 32, 8192);
+    if (
+      geminiMaxTokens !== null &&
+      this.config.gemini.maxCompletionTokens !== geminiMaxTokens
+    ) {
+      this.config.gemini.maxCompletionTokens = geminiMaxTokens;
+      llmConfigChanged = true;
+    }
+
     if (next.greeting) {
       this.sessionGreeting = String(next.greeting).trim();
     }
@@ -688,6 +757,7 @@ class VoicePipeline extends EventEmitter {
         groqModel: this.config.groq.model,
         cerebrasModel: this.config.cerebras.model,
         sarvamModel: this.config.sarvam.model,
+        geminiModel: this.config.gemini.model,
       });
     }
 
@@ -700,17 +770,21 @@ class VoicePipeline extends EventEmitter {
       groqModel: this.config.groq.model,
       cerebrasModel: this.config.cerebras.model,
       sarvamModel: this.config.sarvam.model,
+      geminiModel: this.config.gemini.model,
       groqTemperature: this.config.groq.temperature,
       cerebrasTemperature: this.config.cerebras.temperature,
       sarvamTemperature: this.config.sarvam.temperature,
+      geminiTemperature: this.config.gemini.temperature,
       groqMaxTokens: this.config.groq.maxCompletionTokens,
       cerebrasMaxTokens: this.config.cerebras.maxCompletionTokens,
       sarvamMaxTokens: this.config.sarvam.maxCompletionTokens,
+      geminiMaxTokens: this.config.gemini.maxCompletionTokens,
       contextTurns: this.#currentContextTurns(),
       systemPrompt:
         this.config.groq.systemPrompt ||
         this.config.cerebras.systemPrompt ||
-        this.config.sarvam.systemPrompt
+        this.config.sarvam.systemPrompt ||
+        this.config.gemini.systemPrompt
           ? 'configured'
           : 'default',
       greeting: this.sessionGreeting || 'none',
@@ -844,7 +918,7 @@ class VoicePipeline extends EventEmitter {
   }
 
   #getProvider(providerName) {
-    const validProviders = ['cerebras', 'groq', 'sarvam'];
+    const validProviders = ['cerebras', 'groq', 'sarvam', 'gemini'];
     const normalized = validProviders.includes(providerName) ? providerName : 'groq';
     if (this.providers.has(normalized)) {
       return this.providers.get(normalized);
@@ -862,6 +936,16 @@ class VoicePipeline extends EventEmitter {
         stop: this.config.cerebras.stop,
         allowReasoningFallback: this.config.cerebras.allowReasoningFallback,
         systemPrompt: this.config.cerebras.systemPrompt,
+      });
+    } else if (normalized === 'gemini') {
+      provider = new GeminiProvider({
+        apiKey: this.config.keys.geminiApiKey,
+        model: this.config.gemini.model,
+        temperature: this.config.gemini.temperature,
+        maxCompletionTokens: this.config.gemini.maxCompletionTokens,
+        topP: this.config.gemini.topP,
+        stop: this.config.gemini.stop,
+        systemPrompt: this.config.gemini.systemPrompt,
       });
     } else if (normalized === 'sarvam') {
       provider = new SarvamProvider({
@@ -1063,6 +1147,8 @@ class VoicePipeline extends EventEmitter {
     let baseSystemPrompt;
     if (providerName === 'cerebras') {
       baseSystemPrompt = this.config.cerebras.systemPrompt;
+    } else if (providerName === 'gemini') {
+      baseSystemPrompt = this.config.gemini.systemPrompt;
     } else if (providerName === 'sarvam') {
       baseSystemPrompt = this.config.sarvam.systemPrompt;
     } else {
@@ -1950,6 +2036,10 @@ class VoicePipeline extends EventEmitter {
         configuredMaxTokens:
           providerName === 'cerebras'
             ? this.config.cerebras.maxCompletionTokens
+            : providerName === 'gemini'
+              ? this.config.gemini.maxCompletionTokens
+              : providerName === 'sarvam'
+                ? this.config.sarvam.maxCompletionTokens
             : this.config.groq.maxCompletionTokens,
       });
     }

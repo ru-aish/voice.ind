@@ -99,6 +99,15 @@ const DEFAULTS = {
     systemPrompt: '',
   },
 
+  gemini: {
+    model: 'gemini-2.0-flash',
+    temperature: 0.2,
+    maxCompletionTokens: 2000,
+    topP: 1,
+    stop: null,
+    systemPrompt: '',
+  },
+
   tools: {
     enabled: true,
     maxIterations: 3,
@@ -122,6 +131,7 @@ const WS_MESSAGE_TYPES = {
   READY: 'ready',
   TOOL_CALL: 'tool_call',
   TOOL_RESULT: 'tool_result',
+  START_SESSION: 'start_session',
 };
 
 module.exports = {

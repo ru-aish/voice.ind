@@ -2,7 +2,7 @@ const { DEFAULTS } = require('./constants');
 const fs = require('fs');
 const path = require('path');
 
-const SUPPORTED_LLM_PROVIDERS = new Set(['groq', 'cerebras', 'sarvam']);
+const SUPPORTED_LLM_PROVIDERS = new Set(['groq', 'cerebras', 'sarvam', 'gemini']);
 
 function parseBool(value, fallback) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -84,6 +84,7 @@ function loadConfig() {
       sarvamApiKey,
       groqApiKey: getRequired('GROQ_API_KEY'),
       cerebrasApiKey: getRequired('CEREBRAS_API_KEY'),
+      geminiApiKey: getRequired('GEMINI_API_KEY') || getRequired('GOOGLE_API_KEY'),
     },
 
     stt: {
@@ -303,6 +304,21 @@ function loadConfig() {
         String(process.env.SARVAM_LLM_SYSTEM_PROMPT || '').trim() ||
         resolvedSharedPrompt ||
         DEFAULTS.sarvam.systemPrompt,
+    },
+
+    gemini: {
+      model: process.env.GEMINI_MODEL || DEFAULTS.gemini.model,
+      temperature: parseNum(process.env.GEMINI_TEMPERATURE, DEFAULTS.gemini.temperature),
+      maxCompletionTokens: parseNum(
+        process.env.GEMINI_MAX_TOKENS,
+        DEFAULTS.gemini.maxCompletionTokens
+      ),
+      topP: parseNum(process.env.GEMINI_TOP_P, DEFAULTS.gemini.topP),
+      stop: parseStopValue(process.env.GEMINI_STOP, DEFAULTS.gemini.stop),
+      systemPrompt:
+        String(process.env.GEMINI_SYSTEM_PROMPT || '').trim() ||
+        resolvedSharedPrompt ||
+        DEFAULTS.gemini.systemPrompt,
     },
 
     tools: {

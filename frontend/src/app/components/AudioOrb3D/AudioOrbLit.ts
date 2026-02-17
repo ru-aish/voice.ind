@@ -121,6 +121,7 @@ export class GdmLiveAudio extends LitElement {
   private activeRequestId: number | null = null;
   private droppedRequestIds = new Set<number>();
   private greetingPlayed = false;
+  private pendingStartSession = false;
 
   @state() declare currentSettings: AgentSettings;
 
@@ -392,12 +393,15 @@ export class GdmLiveAudio extends LitElement {
       groqModel: 'openai/gpt-oss-20b',
       cerebrasModel: 'gpt-oss-120b',
       sarvamModel: 'sarvam-m',
+      geminiModel: 'gemini-2.0-flash',
       groqTemperature: 0.2,
       cerebrasTemperature: 0.2,
       sarvamTemperature: 0.2,
+      geminiTemperature: 0.2,
       groqMaxTokens: 2000,
       cerebrasMaxTokens: 2000,
       sarvamMaxTokens: 2000,
+      geminiMaxTokens: 2000,
       promptId: 'default',
       promptContent: 'You are a helpful voice assistant. Respond concisely and naturally.',
       greeting: 'Hello! How can I help you today?',
@@ -610,6 +614,7 @@ export class GdmLiveAudio extends LitElement {
           this.debugLog('ws_close', { code: event.code, reason: event.reason });
           this.isConnecting = false;
           this.sessionId = null;
+          this.greetingPlayed = false;
           
           // Attempt reconnection if not intentional close
           if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
@@ -693,11 +698,12 @@ export class GdmLiveAudio extends LitElement {
     }
     
     this.updateStatus('Ready! Click the mic to start.');
+    this.greetingPlayed = false;
 
     const readyProvider = String(data.provider || '').trim().toLowerCase();
     if (
       readyProvider &&
-      ['groq', 'cerebras', 'sarvam'].includes(readyProvider) &&
+      ['groq', 'cerebras', 'sarvam', 'gemini'].includes(readyProvider) &&
       this.currentSettings.provider !== readyProvider
     ) {
       this.currentSettings = {
@@ -714,15 +720,20 @@ export class GdmLiveAudio extends LitElement {
       groqModel: this.currentSettings.groqModel,
       cerebrasModel: this.currentSettings.cerebrasModel,
       sarvamModel: this.currentSettings.sarvamModel,
+      geminiModel: this.currentSettings.geminiModel,
       groqTemperature: this.currentSettings.groqTemperature,
       cerebrasTemperature: this.currentSettings.cerebrasTemperature,
       sarvamTemperature: this.currentSettings.sarvamTemperature,
+      geminiTemperature: this.currentSettings.geminiTemperature,
       groqMaxTokens: this.currentSettings.groqMaxTokens,
       cerebrasMaxTokens: this.currentSettings.cerebrasMaxTokens,
       sarvamMaxTokens: this.currentSettings.sarvamMaxTokens,
+      geminiMaxTokens: this.currentSettings.geminiMaxTokens,
       systemPrompt: this.currentSettings.promptContent,
       greeting: this.currentSettings.greeting,
     });
+
+    this.maybeSendStartSession();
   }
 
   private handleTranscript(data: TranscriptMessage) {
@@ -923,6 +934,22 @@ export class GdmLiveAudio extends LitElement {
     }
   }
 
+  private maybeSendStartSession() {
+    if (!this.pendingStartSession || this.greetingPlayed) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (!this.sessionId) return;
+
+    this.debugLog('ws_message_out', { type: 'start_session' });
+    this.ws.send(
+      JSON.stringify({
+        type: 'start_session',
+        data: {},
+      })
+    );
+    this.greetingPlayed = true;
+    this.pendingStartSession = false;
+  }
+
   private arrayBufferToBase64(buffer: ArrayBuffer): string {
     const bytes = new Uint8Array(buffer);
     let binary = '';
@@ -1051,6 +1078,7 @@ export class GdmLiveAudio extends LitElement {
     if (this.isRecording) return;
 
     this.infoLog('[VoiceAI] Starting recording...');
+    this.pendingStartSession = true;
 
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.updateStatus('Connecting...');
@@ -1106,6 +1134,7 @@ export class GdmLiveAudio extends LitElement {
       this.sourceNode.connect(this.scriptProcessorNode);
       this.scriptProcessorNode.connect(this.inputAudioContext.destination);
 
+      this.maybeSendStartSession();
       this.isRecording = true;
       this.updateStatus('Recording... Speak now!');
     } catch (err) {
@@ -1150,6 +1179,8 @@ export class GdmLiveAudio extends LitElement {
     this.nextStartTime = 0;
     this.isUserSpeaking = false;
     this.sessionId = null;
+    this.greetingPlayed = false;
+    this.pendingStartSession = false;
     this.resetCC();
     
     this.updateStatus('Session reset.');
@@ -1234,7 +1265,7 @@ export class GdmLiveAudio extends LitElement {
       this.infoLog('[VoiceAI] Settings updated:', event.detail);
 
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.sendConfig({
+      this.sendConfig({
           language: this.currentSettings.languageCode,
           ttsLanguage: this.resolveTtsLanguage(this.currentSettings.languageCode),
           speaker: this.currentSettings.speaker,
@@ -1242,12 +1273,15 @@ export class GdmLiveAudio extends LitElement {
           groqModel: this.currentSettings.groqModel,
           cerebrasModel: this.currentSettings.cerebrasModel,
           sarvamModel: this.currentSettings.sarvamModel,
+          geminiModel: this.currentSettings.geminiModel,
           groqTemperature: this.currentSettings.groqTemperature,
           cerebrasTemperature: this.currentSettings.cerebrasTemperature,
           sarvamTemperature: this.currentSettings.sarvamTemperature,
+          geminiTemperature: this.currentSettings.geminiTemperature,
           groqMaxTokens: this.currentSettings.groqMaxTokens,
           cerebrasMaxTokens: this.currentSettings.cerebrasMaxTokens,
           sarvamMaxTokens: this.currentSettings.sarvamMaxTokens,
+          geminiMaxTokens: this.currentSettings.geminiMaxTokens,
           systemPrompt: this.currentSettings.promptContent,
           greeting: this.currentSettings.greeting,
         });
