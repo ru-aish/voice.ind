@@ -248,6 +248,8 @@ class VoicePipeline extends EventEmitter {
     this.sessionGreeting = null;
     this.greetingPlayed = false;
     this.stopped = false;
+    this.sttReconnectPromise = null;
+    this.lastSttDropMetricAtMs = 0;
   }
 
   async start() {
@@ -792,18 +794,38 @@ class VoicePipeline extends EventEmitter {
   }
 
   handleAudioChunk(audioBase64OrBuffer) {
-    if (!this.sttClient) {
-      throw new Error('STT client is not initialized');
-    }
+    const sttReady = this.sttClient && this.sttClient.connected;
+    if (!sttReady) {
+      this.#ensureSttConnectedNonBlocking('audio_chunk');
 
-    if (Buffer.isBuffer(audioBase64OrBuffer) || audioBase64OrBuffer instanceof Uint8Array) {
-      this.sttClient.sendAudioBuffer(audioBase64OrBuffer);
+      const nowMs = Date.now();
+      if (nowMs - this.lastSttDropMetricAtMs >= 1000) {
+        this.lastSttDropMetricAtMs = nowMs;
+        this.emit('metrics', {
+          type: 'stt_audio_dropped_not_connected',
+          atMs: nowMs,
+          atIso: nowIso(nowMs),
+        });
+      }
       return;
     }
 
-    const audioBase64 = String(audioBase64OrBuffer || '').trim();
-    if (!audioBase64) return;
-    this.sttClient.sendAudioBase64(audioBase64);
+    try {
+      if (Buffer.isBuffer(audioBase64OrBuffer) || audioBase64OrBuffer instanceof Uint8Array) {
+        this.sttClient.sendAudioBuffer(audioBase64OrBuffer);
+        return;
+      }
+
+      const audioBase64 = String(audioBase64OrBuffer || '').trim();
+      if (!audioBase64) return;
+      this.sttClient.sendAudioBase64(audioBase64);
+    } catch (err) {
+      this.#ensureSttConnectedNonBlocking('audio_send_error');
+      this.emit('metrics', {
+        type: 'stt_audio_dropped_send_error',
+        reason: String(err?.message || err || 'unknown_send_error'),
+      });
+    }
   }
 
   handleTextInput(text) {
@@ -884,13 +906,42 @@ class VoicePipeline extends EventEmitter {
     });
 
     this.sttClient.on('close', (event) => {
+      const closedClient = this.sttClient;
+      if (closedClient) {
+        this.sttClient = null;
+      }
       this.emit('metrics', {
         type: 'stt_socket_closed',
         code: event?.code ?? null,
       });
+      if (!this.stopped) {
+        this.#ensureSttConnectedNonBlocking('socket_close');
+      }
     });
 
     await this.sttClient.connect();
+  }
+
+  #ensureSttConnectedNonBlocking(source = 'unknown') {
+    if (this.stopped) return;
+    if (this.sttClient && this.sttClient.connected) return;
+    if (this.sttReconnectPromise) return;
+
+    this.sttReconnectPromise = this.#connectSttClient(true)
+      .then(() => {
+        this.emit('metrics', {
+          type: 'stt_reconnected',
+          source,
+        });
+      })
+      .catch((err) => {
+        this.emit('error', {
+          error: `stt_reconnect_failed:${err?.message || err}`,
+        });
+      })
+      .finally(() => {
+        this.sttReconnectPromise = null;
+      });
   }
 
   async #ensureTtsClient() {
