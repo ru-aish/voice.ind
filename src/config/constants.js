@@ -7,7 +7,7 @@ const DEFAULTS = {
   stt: {
     model: 'saaras:v3',
     languageCode: 'gu-IN',
-    sampleRate: 16000,
+    sampleRate: 24000,
     inputAudioCodec: 'wav',
     encoding: 'audio/wav',
     highVadSensitivity: true,
@@ -20,10 +20,10 @@ const DEFAULTS = {
     speaker: 'shubh',
     languageCode: 'gu-IN',
     pace: 1.0,
-    minBufferSize: 30,
-    maxChunkLength: 50,
+    minBufferSize: 100,
+    maxChunkLength: 500,
     outputCodec: 'wav',
-    maxTextChars: 180,
+    maxTextChars: 500,
     flushDelayMs: 2,
     sampleRate: 24000,
   },
@@ -87,6 +87,15 @@ const DEFAULTS = {
     reasoningEffort: 'low',
     stop: null,
     allowReasoningFallback: false,
+    systemPrompt: '',
+  },
+
+  sarvam: {
+    model: 'sarvam-m',
+    temperature: 0.2,
+    maxCompletionTokens: 2000,
+    topP: 1,
+    stop: null,
     systemPrompt: '',
   },
 
