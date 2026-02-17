@@ -58,6 +58,14 @@ function createMessageHandler({ session, send }) {
         return;
       }
 
+      if (type === 'start_session' || type === WS_MESSAGE_TYPES.START_SESSION) {
+        await session.pipeline.playGreeting();
+        send(WS_MESSAGE_TYPES.METRICS, {
+          type: 'greeting_triggered',
+        });
+        return;
+      }
+
       if (type === WS_MESSAGE_TYPES.ABORT) {
         session.pipeline.abortCurrent('client_abort');
         send(WS_MESSAGE_TYPES.METRICS, {

@@ -61,6 +61,13 @@ function languageLabel(languageCode) {
 const SUPPORTED_TTS_LANGUAGE_CODES = new Set(['hi-in', 'en-in', 'gu-in']);
 const DEFAULT_TTS_FALLBACK_LANGUAGE = 'gu-IN';
 
+// Language-aware greeting prompts for AI-generated greetings
+const GREETING_PROMPTS = {
+  'gu-IN': 'Greet the user briefly in Gujarati language using Gujarati script. Say something friendly like "Hello, how can I help you today?" but in Gujarati. Keep it to one short sentence.',
+  'hi-IN': 'Greet the user briefly in Hindi language using Devanagari script. Say something friendly like "Hello, how can I help you today?" but in Hindi. Keep it to one short sentence.',
+  'en-IN': 'Greet the user briefly in English. Say something friendly like "Hello, how can I help you today?" Keep it to one short sentence.',
+};
+
 function canonicalLanguageCode(languageCode) {
   const normalized = String(languageCode || '').trim().toLowerCase();
   if (normalized === 'gu' || normalized === 'gu-in') return 'gu-IN';
@@ -237,6 +244,7 @@ class VoicePipeline extends EventEmitter {
     this.turnCounter = 0;
 
     this.sessionGreeting = null;
+    this.greetingPlayed = false;
     this.stopped = false;
   }
 
@@ -259,6 +267,147 @@ class VoicePipeline extends EventEmitter {
       ttsLanguage: this.config.tts.languageCode,
       sampleRate: this.config.stt.sampleRate,
     });
+  }
+
+  // Play AI-generated greeting - called when user clicks mic
+  async playGreeting() {
+    if (this.greetingPlayed) {
+      return;
+    }
+    this.greetingPlayed = true;
+
+    // Get the greeting prompt based on configured language
+    const languageCode = this.config.tts.languageCode || 'gu-IN';
+    const greetingPrompt = GREETING_PROMPTS[languageCode] || GREETING_PROMPTS['gu-IN'];
+
+    // Build messages with system prompt and greeting instruction
+    const providerName = this.activeProvider;
+    const baseSystemPrompt =
+      providerName === 'cerebras'
+        ? this.config.cerebras.systemPrompt
+        : this.config.groq.systemPrompt;
+    const languageInstruction = buildLanguageConstraintInstruction(this.config.tts.languageCode);
+
+    const systemParts = [];
+    if (baseSystemPrompt) systemParts.push(String(baseSystemPrompt).trim());
+    if (languageInstruction) systemParts.push(languageInstruction);
+    const systemPrompt = systemParts.filter(Boolean).join('\n\n');
+
+    const messages = [];
+    if (systemPrompt) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+    messages.push({ role: 'user', content: greetingPrompt });
+
+    // Emit metrics
+    this.emit('metrics', {
+      type: 'greeting_start',
+      language: languageCode,
+    });
+
+    // Generate greeting via LLM and stream through TTS
+    await this.#runGreetingTurn(messages);
+  }
+
+  async #runGreetingTurn(messages) {
+    const provider = this.#getProvider(this.activeProvider);
+    const tts = await this.#ensureTtsClient();
+
+    let bufferedText = '';
+    const greetingRequestId = 0;
+
+    try {
+      await provider.streamText({
+        prompt: null,
+        messages,
+        abortSignal: null,
+        tools: undefined,
+        onFirstToken: async ({ atMs, source }) => {
+          this.emit('metrics', {
+            type: 'greeting_first_token',
+            atMs,
+            source,
+          });
+        },
+        onToken: async (tokenText) => {
+          bufferedText += tokenText;
+
+          // Split into sentences and send to TTS
+          const { chunks, remaining } = extractLineChunks(bufferedText, this.config.tts.maxTextChars);
+          bufferedText = remaining;
+
+          for (const ready of chunks) {
+            const contentPrepared = this.config.pipeline.ttsSanitize
+              ? sanitizeTextForTtsLanguage(ready, this.config.tts.languageCode)
+              : ready;
+
+            if (!contentPrepared) continue;
+
+            // Emit greeting text for captions
+            this.emit('greeting', { text: contentPrepared });
+
+            await tts.speakText(contentPrepared, {
+              onAudioChunk: ({ base64, atMs }) => {
+                this.emit('audio', {
+                  requestId: greetingRequestId,
+                  provider: this.activeProvider,
+                  segmentIndex: 1,
+                  audioBase64: base64,
+                  atMs,
+                  atIso: nowIso(atMs),
+                  isGreeting: true,
+                });
+              },
+            });
+          }
+        },
+      });
+
+      // Flush remaining text
+      if (bufferedText.trim()) {
+        const contentPrepared = this.config.pipeline.ttsSanitize
+          ? sanitizeTextForTtsLanguage(bufferedText, this.config.tts.languageCode)
+          : bufferedText;
+
+        if (contentPrepared) {
+          this.emit('greeting', { text: contentPrepared });
+
+          await tts.speakText(contentPrepared, {
+            onAudioChunk: ({ base64, atMs }) => {
+              this.emit('audio', {
+                requestId: greetingRequestId,
+                provider: this.activeProvider,
+                segmentIndex: 1,
+                audioBase64: base64,
+                atMs,
+                atIso: nowIso(atMs),
+                isGreeting: true,
+              });
+            },
+          });
+        }
+      }
+
+      // Add greeting to conversation history
+      const greetingText = messages[1]?.content;
+      if (greetingText) {
+        this.conversationHistory.push({
+          role: 'assistant',
+          content: greetingText,
+          turnId: 0,
+          timestampMs: Date.now(),
+          isGreeting: true,
+        });
+      }
+
+      this.emit('metrics', {
+        type: 'greeting_complete',
+      });
+    } catch (err) {
+      this.emit('error', {
+        error: 'greeting_error: ' + (err?.message || err),
+      });
+    }
   }
 
   async stop() {

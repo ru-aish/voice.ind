@@ -120,6 +120,7 @@ export class GdmLiveAudio extends LitElement {
   private isConnecting = false;
   private activeRequestId: number | null = null;
   private droppedRequestIds = new Set<number>();
+  private greetingPlayed = false;
 
   @state() declare currentSettings: AgentSettings;
 
