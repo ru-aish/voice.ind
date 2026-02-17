@@ -1,13 +1,13 @@
 const { WS_MESSAGE_TYPES } = require('../config/constants');
 
 const CLIENT_MESSAGE_SCHEMA = {
-  type: "'audio' | 'text' | 'config' | 'abort'",
+  type: "'audio' | 'text' | 'config' | 'abort' | 'start_session'",
   data: {
     audio: 'base64 encoded audio chunk (optional)',
     text: 'plain text prompt (optional)',
     config: {
       language: "'hi-IN' | 'gu-IN' | 'en-IN'",
-      provider: "'groq' | 'cerebras' | 'sarvam'",
+      provider: "'groq' | 'cerebras' | 'sarvam' | 'gemini'",
       enableSpeaker: 'boolean (reserved for client-side playback)',
     },
   },

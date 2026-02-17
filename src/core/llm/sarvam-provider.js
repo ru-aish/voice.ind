@@ -25,7 +25,8 @@ class SarvamProvider extends LlmProvider {
   }
 
   async streamText({ prompt, messages, abortSignal, onToken, onFirstToken, tools, onToolCall }) {
-    if (!prompt || !String(prompt).trim()) {
+    const hasMessages = Array.isArray(messages) && messages.length > 0;
+    if (!hasMessages && (!prompt || !String(prompt).trim())) {
       throw new Error('Prompt is empty');
     }
 

@@ -4,7 +4,7 @@ const WebSocket = require('ws');
 const { spawn } = require('child_process');
 
 const ARGS = process.argv.slice(2);
-const SUPPORTED_PROVIDERS = new Set(['groq', 'cerebras', 'sarvam']);
+const SUPPORTED_PROVIDERS = new Set(['groq', 'cerebras', 'sarvam', 'gemini']);
 
 function hasFlag(flag) {
   return ARGS.includes(flag);
@@ -79,7 +79,7 @@ if (hasFlag('--help') || hasFlag('-h')) {
   npm run voice:client -- --provider=cerebras --language=hi-IN --verbose
 
 Options:
-  --provider=groq|cerebras|sarvam
+  --provider=groq|cerebras|sarvam|gemini
   --language=hi-IN|gu-IN|en-IN
   --tts-language=hi-IN|en-IN|gu-IN
   --no-speaker
@@ -386,7 +386,7 @@ function handleServerMessage(raw) {
     }
     if (metricType === 'llm_config_updated') {
       log(
-        `llm_config_updated provider=${data.provider ?? 'n/a'} groq_model=${data.groqModel ?? 'n/a'} cerebras_model=${data.cerebrasModel ?? 'n/a'}`
+        `llm_config_updated provider=${data.provider ?? 'n/a'} groq_model=${data.groqModel ?? 'n/a'} cerebras_model=${data.cerebrasModel ?? 'n/a'} sarvam_model=${data.sarvamModel ?? 'n/a'} gemini_model=${data.geminiModel ?? 'n/a'}`
       );
       return;
     }
