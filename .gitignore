@@ -29,3 +29,4 @@ Thumbs.db
 # Local env and temp
 frontend/.env.local
 *.bak
+test*

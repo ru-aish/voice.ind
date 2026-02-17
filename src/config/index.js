@@ -2,6 +2,8 @@ const { DEFAULTS } = require('./constants');
 const fs = require('fs');
 const path = require('path');
 
+const SUPPORTED_LLM_PROVIDERS = new Set(['groq', 'cerebras', 'sarvam']);
+
 function parseBool(value, fallback) {
   if (value === undefined || value === null || value === '') return fallback;
   const normalized = String(value).trim().toLowerCase();
@@ -27,6 +29,21 @@ function parseStopValue(value, fallback = null) {
       .filter(Boolean);
   }
   return raw;
+}
+
+function normalizeProvider(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (!SUPPORTED_LLM_PROVIDERS.has(normalized)) return '';
+  return normalized;
+}
+
+function resolveProvider(...candidates) {
+  for (const candidate of candidates) {
+    const normalized = normalizeProvider(candidate);
+    if (normalized) return normalized;
+  }
+  return DEFAULTS.llm.provider;
 }
 
 function getRequired(name, fallback = '') {
@@ -101,10 +118,12 @@ function loadConfig() {
     },
 
     llm: {
-      provider:
-        (process.env.DEFAULT_PROVIDER || process.env.VOICE_PIPELINE_PROVIDER || DEFAULTS.llm.provider)
-          .trim()
-          .toLowerCase(),
+      provider: resolveProvider(
+        process.env.VOICE_PIPELINE_PROVIDER,
+        process.env.DEFAULT_PROVIDER,
+        process.env.LLM_PROVIDER,
+        DEFAULTS.llm.provider
+      ),
     },
 
     bridge: {

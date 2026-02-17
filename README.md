@@ -88,7 +88,7 @@ Server runs on `ws://localhost:8081/`
 | `SARVAM_API_KEY` | Yes | For STT and TTS |
 | `GROQ_API_KEY` | Yes | For LLM inference |
 | `CEREBRAS_API_KEY` | No | Alternative LLM |
-| `DEFAULT_PROVIDER` | No | `groq` or `cerebras` |
+| `DEFAULT_PROVIDER` | No | `groq`, `cerebras`, or `sarvam` |
 | `SARVAM_STT_LANGUAGE_CODE` | No | Default: `hi-IN` |
 
 ## Deploy
@@ -146,5 +146,5 @@ ws.on('message', (data) => {
 ## Architecture
 
 ```
-Client Audio → Sarvam STT → Groq/Cerebras LLM → Sarvam TTS → Client Audio
+Client Audio → Sarvam STT → Groq/Cerebras/Sarvam LLM → Sarvam TTS → Client Audio
 ```

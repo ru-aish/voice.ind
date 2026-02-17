@@ -4,6 +4,7 @@ const WebSocket = require('ws');
 const { spawn } = require('child_process');
 
 const ARGS = process.argv.slice(2);
+const SUPPORTED_PROVIDERS = new Set(['groq', 'cerebras', 'sarvam']);
 
 function hasFlag(flag) {
   return ARGS.includes(flag);
@@ -33,6 +34,21 @@ function resolveClientTtsLanguage(sttLanguage) {
   return normalizedStt || 'gu-IN';
 }
 
+function normalizeProvider(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (!SUPPORTED_PROVIDERS.has(normalized)) return '';
+  return normalized;
+}
+
+function resolveProvider(...candidates) {
+  for (const candidate of candidates) {
+    const normalized = normalizeProvider(candidate);
+    if (normalized) return normalized;
+  }
+  return 'groq';
+}
+
 const SERVER_PORT = Number(process.env.PORT || 8081);
 const SERVER_PATH = process.env.VOICE_SERVER_WS_PATH || '/';
 const WS_URL =
@@ -42,7 +58,11 @@ const MIC_DEVICE = process.env.MIC_DEVICE || 'pulse';
 const SPEAKER_DEVICE = process.env.SPEAKER_DEVICE || 'pulse';
 const SAMPLE_RATE = Number(process.env.SARVAM_STT_SAMPLE_RATE || 16000);
 const TTS_SAMPLE_RATE = Number(process.env.TTS_SAMPLE_RATE || process.env.VOICE_TTS_SAMPLE_RATE || 24000);
-const PROVIDER = (getArgValue('--provider') || process.env.DEFAULT_PROVIDER || 'groq').toLowerCase();
+const PROVIDER = resolveProvider(
+  getArgValue('--provider'),
+  process.env.VOICE_PIPELINE_PROVIDER,
+  process.env.DEFAULT_PROVIDER
+);
 const LANGUAGE = getArgValue('--language') || process.env.SARVAM_STT_LANGUAGE_CODE || 'gu-IN';
 const TTS_LANGUAGE = resolveClientTtsLanguage(LANGUAGE);
 const VERBOSE = hasFlag('--verbose') || String(process.env.VOICE_CLIENT_VERBOSE || 'false') === 'true';
@@ -59,7 +79,7 @@ if (hasFlag('--help') || hasFlag('-h')) {
   npm run voice:client -- --provider=cerebras --language=hi-IN --verbose
 
 Options:
-  --provider=groq|cerebras
+  --provider=groq|cerebras|sarvam
   --language=hi-IN|gu-IN|en-IN
   --tts-language=hi-IN|en-IN|gu-IN
   --no-speaker

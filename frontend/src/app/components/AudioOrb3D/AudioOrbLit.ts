@@ -391,10 +391,13 @@ export class GdmLiveAudio extends LitElement {
       provider: 'groq',
       groqModel: 'openai/gpt-oss-20b',
       cerebrasModel: 'gpt-oss-120b',
+      sarvamModel: 'sarvam-m',
       groqTemperature: 0.2,
       cerebrasTemperature: 0.2,
+      sarvamTemperature: 0.2,
       groqMaxTokens: 2000,
       cerebrasMaxTokens: 2000,
+      sarvamMaxTokens: 2000,
       promptId: 'default',
       promptContent: 'You are a helpful voice assistant. Respond concisely and naturally.',
       greeting: 'Hello! How can I help you today?',
@@ -691,6 +694,18 @@ export class GdmLiveAudio extends LitElement {
     
     this.updateStatus('Ready! Click the mic to start.');
 
+    const readyProvider = String(data.provider || '').trim().toLowerCase();
+    if (
+      readyProvider &&
+      ['groq', 'cerebras', 'sarvam'].includes(readyProvider) &&
+      this.currentSettings.provider !== readyProvider
+    ) {
+      this.currentSettings = {
+        ...this.currentSettings,
+        provider: readyProvider as AgentSettings['provider'],
+      };
+    }
+
     this.sendConfig({
       language: this.currentSettings.languageCode,
       ttsLanguage: this.resolveTtsLanguage(this.currentSettings.languageCode),
@@ -698,10 +713,13 @@ export class GdmLiveAudio extends LitElement {
       provider: this.currentSettings.provider,
       groqModel: this.currentSettings.groqModel,
       cerebrasModel: this.currentSettings.cerebrasModel,
+      sarvamModel: this.currentSettings.sarvamModel,
       groqTemperature: this.currentSettings.groqTemperature,
       cerebrasTemperature: this.currentSettings.cerebrasTemperature,
+      sarvamTemperature: this.currentSettings.sarvamTemperature,
       groqMaxTokens: this.currentSettings.groqMaxTokens,
       cerebrasMaxTokens: this.currentSettings.cerebrasMaxTokens,
+      sarvamMaxTokens: this.currentSettings.sarvamMaxTokens,
       systemPrompt: this.currentSettings.promptContent,
       greeting: this.currentSettings.greeting,
     });
@@ -1223,10 +1241,13 @@ export class GdmLiveAudio extends LitElement {
           provider: this.currentSettings.provider,
           groqModel: this.currentSettings.groqModel,
           cerebrasModel: this.currentSettings.cerebrasModel,
+          sarvamModel: this.currentSettings.sarvamModel,
           groqTemperature: this.currentSettings.groqTemperature,
           cerebrasTemperature: this.currentSettings.cerebrasTemperature,
+          sarvamTemperature: this.currentSettings.sarvamTemperature,
           groqMaxTokens: this.currentSettings.groqMaxTokens,
           cerebrasMaxTokens: this.currentSettings.cerebrasMaxTokens,
+          sarvamMaxTokens: this.currentSettings.sarvamMaxTokens,
           systemPrompt: this.currentSettings.promptContent,
           greeting: this.currentSettings.greeting,
         });

@@ -535,6 +535,7 @@ class VoicePipeline extends EventEmitter {
       if (promptText) {
         this.config.groq.systemPrompt = promptText;
         this.config.cerebras.systemPrompt = promptText;
+        this.config.sarvam.systemPrompt = promptText;
       }
     }
 
@@ -543,6 +544,11 @@ class VoicePipeline extends EventEmitter {
       if (this.activeProvider === 'cerebras') {
         if (this.config.cerebras.model !== model) {
           this.config.cerebras.model = model;
+          llmConfigChanged = true;
+        }
+      } else if (this.activeProvider === 'sarvam') {
+        if (this.config.sarvam.model !== model) {
+          this.config.sarvam.model = model;
           llmConfigChanged = true;
         }
       } else if (this.config.groq.model !== model) {
@@ -567,11 +573,24 @@ class VoicePipeline extends EventEmitter {
       }
     }
 
+    if (next.sarvamModel && String(next.sarvamModel).trim()) {
+      const model = String(next.sarvamModel).trim();
+      if (this.config.sarvam.model !== model) {
+        this.config.sarvam.model = model;
+        llmConfigChanged = true;
+      }
+    }
+
     const activeTemperature = parseBounded(next.temperature, 0, 2);
     if (activeTemperature !== null) {
       if (this.activeProvider === 'cerebras') {
         if (this.config.cerebras.temperature !== activeTemperature) {
           this.config.cerebras.temperature = activeTemperature;
+          llmConfigChanged = true;
+        }
+      } else if (this.activeProvider === 'sarvam') {
+        if (this.config.sarvam.temperature !== activeTemperature) {
+          this.config.sarvam.temperature = activeTemperature;
           llmConfigChanged = true;
         }
       } else if (this.config.groq.temperature !== activeTemperature) {
@@ -592,6 +611,12 @@ class VoicePipeline extends EventEmitter {
       llmConfigChanged = true;
     }
 
+    const sarvamTemperature = parseBounded(next.sarvamTemperature, 0, 2);
+    if (sarvamTemperature !== null && this.config.sarvam.temperature !== sarvamTemperature) {
+      this.config.sarvam.temperature = sarvamTemperature;
+      llmConfigChanged = true;
+    }
+
     const activeMaxTokens = parseBoundedInt(
       next.maxCompletionTokens ?? next.maxTokens,
       32,
@@ -601,6 +626,11 @@ class VoicePipeline extends EventEmitter {
       if (this.activeProvider === 'cerebras') {
         if (this.config.cerebras.maxCompletionTokens !== activeMaxTokens) {
           this.config.cerebras.maxCompletionTokens = activeMaxTokens;
+          llmConfigChanged = true;
+        }
+      } else if (this.activeProvider === 'sarvam') {
+        if (this.config.sarvam.maxCompletionTokens !== activeMaxTokens) {
+          this.config.sarvam.maxCompletionTokens = activeMaxTokens;
           llmConfigChanged = true;
         }
       } else if (this.config.groq.maxCompletionTokens !== activeMaxTokens) {
@@ -621,6 +651,15 @@ class VoicePipeline extends EventEmitter {
       this.config.cerebras.maxCompletionTokens !== cerebrasMaxTokens
     ) {
       this.config.cerebras.maxCompletionTokens = cerebrasMaxTokens;
+      llmConfigChanged = true;
+    }
+
+    const sarvamMaxTokens = parseBoundedInt(next.sarvamMaxTokens, 32, 8192);
+    if (
+      sarvamMaxTokens !== null &&
+      this.config.sarvam.maxCompletionTokens !== sarvamMaxTokens
+    ) {
+      this.config.sarvam.maxCompletionTokens = sarvamMaxTokens;
       llmConfigChanged = true;
     }
 
@@ -648,6 +687,7 @@ class VoicePipeline extends EventEmitter {
         provider: this.activeProvider,
         groqModel: this.config.groq.model,
         cerebrasModel: this.config.cerebras.model,
+        sarvamModel: this.config.sarvam.model,
       });
     }
 
@@ -659,12 +699,20 @@ class VoicePipeline extends EventEmitter {
       ttsSpeaker: this.config.tts.speaker,
       groqModel: this.config.groq.model,
       cerebrasModel: this.config.cerebras.model,
+      sarvamModel: this.config.sarvam.model,
       groqTemperature: this.config.groq.temperature,
       cerebrasTemperature: this.config.cerebras.temperature,
+      sarvamTemperature: this.config.sarvam.temperature,
       groqMaxTokens: this.config.groq.maxCompletionTokens,
       cerebrasMaxTokens: this.config.cerebras.maxCompletionTokens,
+      sarvamMaxTokens: this.config.sarvam.maxCompletionTokens,
       contextTurns: this.#currentContextTurns(),
-      systemPrompt: this.config.groq.systemPrompt ? 'configured' : 'default',
+      systemPrompt:
+        this.config.groq.systemPrompt ||
+        this.config.cerebras.systemPrompt ||
+        this.config.sarvam.systemPrompt
+          ? 'configured'
+          : 'default',
       greeting: this.sessionGreeting || 'none',
     };
   }
@@ -1031,14 +1079,46 @@ class VoicePipeline extends EventEmitter {
       messages.push({ role: 'system', content: systemPrompt });
     }
 
+    const normalizedTurns = [];
+    const appendTurn = (role, content) => {
+      const normalizedRole = String(role || '').trim().toLowerCase();
+      const text = String(content || '').trim();
+      if (!text) return;
+      if (normalizedRole !== 'user' && normalizedRole !== 'assistant') return;
+
+      const last = normalizedTurns[normalizedTurns.length - 1];
+      if (!last) {
+        if (normalizedRole !== 'user') return;
+        normalizedTurns.push({ role: normalizedRole, content: text });
+        return;
+      }
+
+      if (last.role === normalizedRole) {
+        // Sarvam requires strict alternation; collapse adjacent same-role turns.
+        if (last.content === text) return;
+        last.content = mergeText(last.content, text);
+        return;
+      }
+
+      normalizedTurns.push({ role: normalizedRole, content: text });
+    };
+
     if (this.config.pipeline.contextEnabled) {
       for (const msg of this.conversationHistory) {
-        if (!msg?.role || !msg?.content) continue;
-        messages.push({ role: msg.role, content: msg.content });
+        appendTurn(msg?.role, msg?.content);
       }
     }
 
-    messages.push({ role: 'user', content: prompt });
+    appendTurn('user', prompt);
+
+    if (normalizedTurns.length === 0) {
+      normalizedTurns.push({ role: 'user', content: String(prompt || '').trim() });
+    }
+
+    for (const turn of normalizedTurns) {
+      messages.push(turn);
+    }
+
     return messages;
   }
 

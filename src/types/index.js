@@ -7,7 +7,7 @@ const CLIENT_MESSAGE_SCHEMA = {
     text: 'plain text prompt (optional)',
     config: {
       language: "'hi-IN' | 'gu-IN' | 'en-IN'",
-      provider: "'groq' | 'cerebras'",
+      provider: "'groq' | 'cerebras' | 'sarvam'",
       enableSpeaker: 'boolean (reserved for client-side playback)',
     },
   },

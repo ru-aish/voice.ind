@@ -5,6 +5,17 @@ const { VoiceWebSocketServer } = require('./server/websocket-server');
 
 async function main() {
   const config = loadConfig();
+  const defaultProvider = String(process.env.DEFAULT_PROVIDER || '').trim();
+  const pipelineProvider = String(process.env.VOICE_PIPELINE_PROVIDER || '').trim();
+  if (
+    defaultProvider &&
+    pipelineProvider &&
+    defaultProvider.toLowerCase() !== pipelineProvider.toLowerCase()
+  ) {
+    console.warn(
+      `[voice.ai] provider_env_conflict DEFAULT_PROVIDER=${defaultProvider} VOICE_PIPELINE_PROVIDER=${pipelineProvider} effective_provider=${config.llm.provider}`
+    );
+  }
 
   const server = new VoiceWebSocketServer(config);
   const started = await server.start();
