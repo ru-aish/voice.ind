@@ -412,7 +412,7 @@ export class GdmLiveAudio extends LitElement {
   }
 
   private shouldLogDebug(): boolean {
-    return process.env.NODE_ENV === 'development' && Boolean(this.currentSettings.showDebugLogs);
+    return Boolean(this.currentSettings.showDebugLogs);
   }
 
   private infoLog(...args: unknown[]) {
@@ -905,6 +905,20 @@ export class GdmLiveAudio extends LitElement {
       return;
     }
 
+    if (data.type === 'stt_audio_dropped_not_connected') {
+      this.warnLog('[VoiceAI] STT not connected, dropping audio packet while reconnecting');
+      this.updateStatus('Reconnecting speech pipeline...');
+      return;
+    }
+
+    if (data.type === 'stt_reconnected') {
+      this.infoLog('[VoiceAI] STT reconnected');
+      if (this.isRecording) {
+        this.updateStatus('Recording... Speak now!');
+      }
+      return;
+    }
+
     this.debugLog('metric_other', data);
   }
 
@@ -920,7 +934,8 @@ export class GdmLiveAudio extends LitElement {
 
   private sendAudio(audioData: ArrayBuffer) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const base64 = this.arrayBufferToBase64(audioData);
+      // Backend STT is configured for WAV input; wrap PCM16 mic frame into WAV payload.
+      const base64 = this.arrayBufferToBase64(this.wrapPcm16AsWav(audioData, 16000, 1));
       this.outboundAudioPackets += 1;
       this.debugLog('ws_message_out', {
         type: 'audio',
@@ -957,6 +972,44 @@ export class GdmLiveAudio extends LitElement {
       binary += String.fromCharCode(bytes[i]);
     }
     return btoa(binary);
+  }
+
+  private wrapPcm16AsWav(
+    pcmBuffer: ArrayBuffer,
+    sampleRate: number,
+    channels: number
+  ): ArrayBuffer {
+    const pcmBytes = pcmBuffer.byteLength;
+    const wavBuffer = new ArrayBuffer(44 + pcmBytes);
+    const view = new DataView(wavBuffer);
+    const payload = new Uint8Array(wavBuffer, 44);
+    payload.set(new Uint8Array(pcmBuffer));
+
+    const writeString = (offset: number, value: string) => {
+      for (let i = 0; i < value.length; i++) {
+        view.setUint8(offset + i, value.charCodeAt(i));
+      }
+    };
+
+    const bitsPerSample = 16;
+    const byteRate = sampleRate * channels * (bitsPerSample / 8);
+    const blockAlign = channels * (bitsPerSample / 8);
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + pcmBytes, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, channels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeString(36, 'data');
+    view.setUint32(40, pcmBytes, true);
+
+    return wavBuffer;
   }
 
   private decodeBase64Audio(rawAudio: string): Uint8Array | null {
@@ -1292,23 +1345,20 @@ export class GdmLiveAudio extends LitElement {
   }
 
   render() {
-    const isDevelopment = process.env.NODE_ENV === 'development';
-    const showDebugPanel = isDevelopment && this.currentSettings.showDebugLogs;
+    const showDebugPanel = this.currentSettings.showDebugLogs;
 
     return html`
       <div>
-        ${isDevelopment ? html`
-          <button
-            class="settings-btn"
-            @click=${() => this.openSettings()}
-            aria-label="Open settings"
-          >
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M7.5 2.25H10.5L11.25 4.5L13.5 5.25L15.75 4.5L17.25 7.5L15.75 9L16.5 11.25L15.75 13.5L13.5 12.75L11.25 13.5L10.5 15.75H7.5L6.75 13.5L4.5 12.75L2.25 13.5L0.75 10.5L2.25 9L1.5 6.75L2.25 4.5L4.5 5.25L6.75 4.5L7.5 2.25Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
-              <circle cx="9" cy="9" r="2.5" stroke="currentColor" stroke-width="1.2"/>
-            </svg>
-          </button>
-        ` : ''}
+        <button
+          class="settings-btn"
+          @click=${() => this.openSettings()}
+          aria-label="Open settings"
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M7.5 2.25H10.5L11.25 4.5L13.5 5.25L15.75 4.5L17.25 7.5L15.75 9L16.5 11.25L15.75 13.5L13.5 12.75L11.25 13.5L10.5 15.75H7.5L6.75 13.5L4.5 12.75L2.25 13.5L0.75 10.5L2.25 9L1.5 6.75L2.25 4.5L4.5 5.25L6.75 4.5L7.5 2.25Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+            <circle cx="9" cy="9" r="2.5" stroke="currentColor" stroke-width="1.2"/>
+          </svg>
+        </button>
 
         ${this.ccVisible && this.ccChunks.length > 0 && this.ccCurrentIndex >= 0 ? html`
           <div class="cc-container">
