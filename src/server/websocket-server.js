@@ -38,6 +38,7 @@ class VoiceWebSocketServer {
       try {
         await this.sessionManager.createSession(ws, req);
       } catch (err) {
+        this.logger.error(`session_init_failed remote=${req?.socket?.remoteAddress || 'unknown'} message=${err?.message || err}`);
         try {
           ws.send(
             JSON.stringify({
@@ -48,7 +49,7 @@ class VoiceWebSocketServer {
             })
           );
         } catch {}
-        ws.close();
+        ws.close(1011, 'session_init_failed');
       }
     });
 

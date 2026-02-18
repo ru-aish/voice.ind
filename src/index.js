@@ -16,6 +16,9 @@ async function main() {
   console.log(
     `[voice.ai] groq_model=${config.groq.model} groq_max_tokens=${config.groq.maxCompletionTokens} cerebras_model=${config.cerebras.model} cerebras_max_tokens=${config.cerebras.maxCompletionTokens}`
   );
+  console.log(
+    `[voice.ai] prompt_source=${config.diagnostics.sharedPromptSource} prompt_file=${config.diagnostics.promptFilePath} prompt_chars=${config.diagnostics.sharedPromptChars} overrides(groq=${config.diagnostics.groqPromptOverride},cerebras=${config.diagnostics.cerebrasPromptOverride},sarvam=${config.diagnostics.sarvamPromptOverride},gemini=${config.diagnostics.geminiPromptOverride})`
+  );
 
   const shutdown = async (signal) => {
     console.log(`[voice.ai] stopping on ${signal}...`);

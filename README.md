@@ -88,7 +88,8 @@ Server runs on `ws://localhost:8081/`
 | `SARVAM_API_KEY` | Yes | For STT and TTS |
 | `GROQ_API_KEY` | Yes | For LLM inference |
 | `CEREBRAS_API_KEY` | No | Alternative LLM |
-| `DEFAULT_PROVIDER` | No | `groq` or `cerebras` |
+| `GEMINI_API_KEY` | No | Gemini LLM provider (or use `GOOGLE_API_KEY`) |
+| `DEFAULT_PROVIDER` | No | `groq`, `cerebras`, `sarvam`, or `gemini` |
 | `SARVAM_STT_LANGUAGE_CODE` | No | Default: `hi-IN` |
 
 ## Deploy

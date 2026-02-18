@@ -1,5 +1,6 @@
 const TERMINATOR_REGEX = /[.!?|।॥\n]$/;
 const SPLIT_REGEX = /([.!?|।॥\n]+)/;
+const SAFE_BREAK_REGEX = /[.!?।॥,\n\s]/;
 
 function extractLineChunks(bufferText, maxChars) {
   const chunks = [];
@@ -41,6 +42,34 @@ function extractLineChunks(bufferText, maxChars) {
   return { chunks, remaining: buffer };
 }
 
+function splitTimeoutSafeChunk(bufferText, minTailChars = 2) {
+  const text = String(bufferText || '');
+  if (!text.trim()) return { chunk: '', remaining: '' };
+
+  let splitIdx = -1;
+  for (let i = text.length - 1; i >= 0; i -= 1) {
+    if (SAFE_BREAK_REGEX.test(text[i])) {
+      splitIdx = i + 1;
+      break;
+    }
+  }
+
+  if (splitIdx <= 0) {
+    return { chunk: '', remaining: text };
+  }
+
+  const chunk = text.slice(0, splitIdx).trim();
+  const remaining = text.slice(splitIdx).trimStart();
+
+  // Keep tiny tails (often half words) for the next token burst.
+  if (remaining && remaining.length < Math.max(1, Number(minTailChars) || 2)) {
+    return { chunk: '', remaining: text };
+  }
+
+  return { chunk, remaining };
+}
+
 module.exports = {
   extractLineChunks,
+  splitTimeoutSafeChunk,
 };

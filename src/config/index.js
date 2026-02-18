@@ -1,6 +1,7 @@
 const { DEFAULTS } = require('./constants');
 const fs = require('fs');
 const path = require('path');
+const SUPPORTED_LLM_PROVIDERS = new Set(['groq', 'cerebras', 'sarvam', 'gemini']);
 
 function parseBool(value, fallback) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -29,6 +30,21 @@ function parseStopValue(value, fallback = null) {
   return raw;
 }
 
+function normalizeProvider(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (!SUPPORTED_LLM_PROVIDERS.has(normalized)) return '';
+  return normalized;
+}
+
+function resolveProvider(...candidates) {
+  for (const candidate of candidates) {
+    const normalized = normalizeProvider(candidate);
+    if (normalized) return normalized;
+  }
+  return DEFAULTS.llm.provider;
+}
+
 function getRequired(name, fallback = '') {
   const value = process.env[name] || fallback;
   return String(value || '').trim();
@@ -53,7 +69,13 @@ function loadConfig() {
   const groqPromptRaw = process.env.GROQ_SYSTEM_PROMPT;
   const cerebrasPromptRaw = process.env.CEREBRAS_SYSTEM_PROMPT;
   const sharedPromptRaw = process.env.VOICE_SYSTEM_PROMPT;
-  const resolvedSharedPrompt = String(sharedPromptRaw || '').trim() || promptFromFile;
+  const sharedPromptFromEnv = String(sharedPromptRaw || '').trim();
+  const resolvedSharedPrompt = sharedPromptFromEnv || promptFromFile;
+  const sharedPromptSource = sharedPromptFromEnv
+    ? 'VOICE_SYSTEM_PROMPT'
+    : promptFromFile
+      ? `file:${promptFilePath}`
+      : 'none';
 
   return {
     server: {
@@ -67,6 +89,7 @@ function loadConfig() {
       sarvamApiKey,
       groqApiKey: getRequired('GROQ_API_KEY'),
       cerebrasApiKey: getRequired('CEREBRAS_API_KEY'),
+      geminiApiKey: getRequired('GEMINI_API_KEY') || getRequired('GOOGLE_API_KEY'),
     },
 
     stt: {
@@ -101,12 +124,12 @@ function loadConfig() {
     },
 
     llm: {
-      provider:
-        (process.env.DEFAULT_PROVIDER || process.env.VOICE_PIPELINE_PROVIDER || DEFAULTS.llm.provider)
-          .trim()
-          .toLowerCase() === 'cerebras'
-          ? 'cerebras'
-          : 'groq',
+      provider: resolveProvider(
+        process.env.VOICE_PIPELINE_PROVIDER,
+        process.env.DEFAULT_PROVIDER,
+        process.env.LLM_PROVIDER,
+        DEFAULTS.llm.provider
+      ),
     },
 
     bridge: {
@@ -203,6 +226,10 @@ function loadConfig() {
         process.env.VOICE_PIPELINE_STREAM_DEBUG_PREVIEW_CHARS,
         DEFAULTS.pipeline.streamDebugPreviewChars
       ),
+      traceFull: parseBool(
+        process.env.VOICE_PIPELINE_TRACE_FULL,
+        DEFAULTS.pipeline.traceFull
+      ),
       ttsSanitize: parseBool(
         process.env.VOICE_PIPELINE_TTS_SANITIZE,
         DEFAULTS.pipeline.ttsSanitize
@@ -270,10 +297,54 @@ function loadConfig() {
         DEFAULTS.cerebras.systemPrompt,
     },
 
+    sarvam: {
+      model: process.env.SARVAM_LLM_MODEL || DEFAULTS.sarvam.model,
+      temperature: parseNum(
+        process.env.SARVAM_LLM_TEMPERATURE,
+        DEFAULTS.sarvam.temperature
+      ),
+      maxCompletionTokens: parseNum(
+        process.env.SARVAM_LLM_MAX_TOKENS,
+        DEFAULTS.sarvam.maxCompletionTokens
+      ),
+      topP: parseNum(process.env.SARVAM_LLM_TOP_P, DEFAULTS.sarvam.topP),
+      reasoningEffort: process.env.SARVAM_LLM_REASONING_EFFORT || DEFAULTS.sarvam.reasoningEffort,
+      stop: parseStopValue(process.env.SARVAM_LLM_STOP, DEFAULTS.sarvam.stop),
+      systemPrompt:
+        String(process.env.SARVAM_LLM_SYSTEM_PROMPT || '').trim() ||
+        resolvedSharedPrompt ||
+        DEFAULTS.sarvam.systemPrompt,
+    },
+
+    gemini: {
+      model: process.env.GEMINI_MODEL || DEFAULTS.gemini.model,
+      temperature: parseNum(process.env.GEMINI_TEMPERATURE, DEFAULTS.gemini.temperature),
+      maxCompletionTokens: parseNum(
+        process.env.GEMINI_MAX_TOKENS,
+        DEFAULTS.gemini.maxCompletionTokens
+      ),
+      topP: parseNum(process.env.GEMINI_TOP_P, DEFAULTS.gemini.topP),
+      stop: parseStopValue(process.env.GEMINI_STOP, DEFAULTS.gemini.stop),
+      systemPrompt:
+        String(process.env.GEMINI_SYSTEM_PROMPT || '').trim() ||
+        resolvedSharedPrompt ||
+        DEFAULTS.gemini.systemPrompt,
+    },
+
     tools: {
       enabled: parseBool(process.env.VOICE_TOOLS_ENABLED, DEFAULTS.tools.enabled),
       maxIterations: parseNum(process.env.VOICE_TOOLS_MAX_ITERATIONS, DEFAULTS.tools.maxIterations),
       // No external API needed - uses Google Calendar directly
+    },
+
+    diagnostics: {
+      promptFilePath,
+      sharedPromptSource,
+      sharedPromptChars: resolvedSharedPrompt.length,
+      groqPromptOverride: Boolean(String(groqPromptRaw || '').trim()),
+      cerebrasPromptOverride: Boolean(String(cerebrasPromptRaw || '').trim()),
+      sarvamPromptOverride: Boolean(String(process.env.SARVAM_LLM_SYSTEM_PROMPT || '').trim()),
+      geminiPromptOverride: Boolean(String(process.env.GEMINI_SYSTEM_PROMPT || '').trim()),
     },
   };
 }
