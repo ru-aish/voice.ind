@@ -49,6 +49,12 @@ function createMessageHandler({ session, send }) {
         return;
       }
 
+      if (type === WS_MESSAGE_TYPES.GREET) {
+        if (!session.ready) return;
+        await session.pipeline.handleGreetingRequest(data.language || '');
+        return;
+      }
+
       if (type === WS_MESSAGE_TYPES.CONFIG) {
         const applied = await session.pipeline.applyConfig(data.config || {});
         send(WS_MESSAGE_TYPES.METRICS, {

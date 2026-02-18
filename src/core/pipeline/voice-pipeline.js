@@ -146,6 +146,17 @@ function buildLanguageConstraintInstruction(languageCode) {
   return `Respond only in ${label}. Do not switch to any other language/script.`;
 }
 
+function defaultGreetingForLanguage(languageCode) {
+  const normalized = String(languageCode || '').trim().toLowerCase();
+  if (normalized === 'gu-in' || normalized === 'gu') {
+    return 'નમસ્કાર. હું એલિવિક્સ ઇન્ડનો વોઇસ સહાયક છું. આજે હું તમારી કેવી રીતે મદદ કરી શકું?';
+  }
+  if (normalized === 'hi-in' || normalized === 'hi') {
+    return 'नमस्कार. मैं एलिविक्स इंड का वॉइस सहायक हूं. आज मैं आपकी कैसे मदद कर सकता हूं?';
+  }
+  return 'Hello. I am Elevix IND voice assistant. How can I help you today?';
+}
+
 function isSarvamAllowedLanguageError(err) {
   const msg = String(err?.message || err || '').toLowerCase();
   return (
@@ -756,6 +767,52 @@ class VoicePipeline extends EventEmitter {
     }
 
     this.#dispatchTurn(prompt, Date.now(), 'text_input');
+  }
+
+  async handleGreetingRequest(languageCode = '') {
+    const requestedTts = canonicalLanguageCode(languageCode) || this.config.tts.languageCode;
+    const resolvedTtsLanguage = resolveTtsLanguageCode(requestedTts, this.config.tts.languageCode);
+    if (resolvedTtsLanguage.languageCode !== this.config.tts.languageCode) {
+      this.config.tts.languageCode = resolvedTtsLanguage.languageCode;
+      if (this.ttsClient) {
+        await this.ttsClient.close();
+        this.ttsClient = null;
+      }
+    }
+
+    const greetingText =
+      String(this.sessionGreeting || '').trim() ||
+      defaultGreetingForLanguage(this.config.tts.languageCode);
+    if (!greetingText) return;
+
+    const tts = await this.#ensureTtsClient();
+    const greetingRequestId = -1;
+    const greetingSegmentIndex = 1;
+    const startMs = Date.now();
+    const ttsResult = await tts.speakText(greetingText, {
+      onAudioChunk: ({ base64, atMs }) => {
+        this.emit('audio', {
+          requestId: greetingRequestId,
+          provider: 'system',
+          segmentIndex: greetingSegmentIndex,
+          audioBase64: base64,
+          atMs,
+          atIso: nowIso(atMs),
+        });
+      },
+    });
+
+    this.emit('metrics', {
+      type: 'session_greeting_sent',
+      requestId: greetingRequestId,
+      provider: 'system',
+      ttsLanguage: this.config.tts.languageCode,
+      textChars: greetingText.length,
+      sentAtMs: ttsResult.sentAtMs,
+      firstChunkAtMs: ttsResult.firstAudioAtMs,
+      totalTtsMs: ttsResult.totalTtsMs,
+      wallMs: Math.max(0, Date.now() - startMs),
+    });
   }
 
   abortCurrent(reason = 'client_abort') {

@@ -70,8 +70,8 @@ const DEFAULTS = {
   },
 
   groq: {
-    model: 'openai/gpt-oss-20b',
-    temperature: 0.2,
+    model: 'openai/gpt-oss-120b',
+    temperature: 1,
     maxCompletionTokens: 2000,
     topP: 1,
     reasoningEffort: 'low',
@@ -102,9 +102,9 @@ const DEFAULTS = {
   },
 
   gemini: {
-    model: 'gemini-2.5-flash-lite-preview-09-2025',
-    temperature: 0.2,
-    maxCompletionTokens: 2000,
+    model: 'gemini-flash-lite-latest',
+    temperature: 1,
+    maxCompletionTokens: 8000,
     topP: 1,
     stop: null,
     systemPrompt: '',
@@ -123,6 +123,7 @@ const VAD_SIGNALS = {
 
 const WS_MESSAGE_TYPES = {
   AUDIO: 'audio',
+  GREET: 'greet',
   TEXT: 'text',
   CONFIG: 'config',
   ABORT: 'abort',
