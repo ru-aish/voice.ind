@@ -149,12 +149,12 @@ function buildLanguageConstraintInstruction(languageCode) {
 function defaultGreetingForLanguage(languageCode) {
   const normalized = String(languageCode || '').trim().toLowerCase();
   if (normalized === 'gu-in' || normalized === 'gu') {
-    return 'નમસ્કાર. હું એલિવિક્સ ઇન્ડનો વોઇસ સહાયક છું. આજે હું તમારી કેવી રીતે મદદ કરી શકું?';
+    return 'નમસ્કાર. હું એલિવિક્સ એઆઈનો વોઇસ સહાયક છું. આજે હું તમારી કેવી રીતે મદદ કરી શકું?';
   }
   if (normalized === 'hi-in' || normalized === 'hi') {
-    return 'नमस्कार. मैं एलिविक्स इंड का वॉइस सहायक हूं. आज मैं आपकी कैसे मदद कर सकता हूं?';
+    return 'नमस्कार. मैं एलिविक्स एआई का वॉइस सहायक हूं. आज मैं आपकी कैसे मदद कर सकता हूं?';
   }
-  return 'Hello. I am Elevix IND voice assistant. How can I help you today?';
+  return 'Hello. I am Elevix AI voice assistant. How can I help you today?';
 }
 
 function isGenericFrontendGreeting(text) {
