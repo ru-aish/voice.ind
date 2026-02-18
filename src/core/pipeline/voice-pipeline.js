@@ -360,7 +360,9 @@ class VoicePipeline extends EventEmitter {
     const validSttCodecs = new Set(['wav', 'pcm_s16le', 'pcm_l16', 'pcm_raw']);
 
     if (next.provider && ['groq', 'cerebras', 'sarvam', 'gemini'].includes(String(next.provider).toLowerCase())) {
-      this.activeProvider = String(next.provider).toLowerCase();
+      if (!this.config.llm.providerLocked) {
+        this.activeProvider = String(next.provider).toLowerCase();
+      }
     }
 
     if (next.language && String(next.language).trim()) {
@@ -458,21 +460,21 @@ class VoicePipeline extends EventEmitter {
     if (next.model && String(next.model).trim()) {
       const model = String(next.model).trim();
       if (this.activeProvider === 'cerebras') {
-        if (this.config.cerebras.model !== model) {
+        if (!this.config.cerebras.modelLocked && this.config.cerebras.model !== model) {
           this.config.cerebras.model = model;
           llmConfigChanged = true;
         }
       } else if (this.activeProvider === 'sarvam') {
-        if (this.config.sarvam.model !== model) {
+        if (!this.config.sarvam.modelLocked && this.config.sarvam.model !== model) {
           this.config.sarvam.model = model;
           llmConfigChanged = true;
         }
       } else if (this.activeProvider === 'gemini') {
-        if (this.config.gemini.model !== model) {
+        if (!this.config.gemini.modelLocked && this.config.gemini.model !== model) {
           this.config.gemini.model = model;
           llmConfigChanged = true;
         }
-      } else if (this.config.groq.model !== model) {
+      } else if (!this.config.groq.modelLocked && this.config.groq.model !== model) {
         this.config.groq.model = model;
         llmConfigChanged = true;
       }
@@ -480,7 +482,7 @@ class VoicePipeline extends EventEmitter {
 
     if (next.groqModel && String(next.groqModel).trim()) {
       const model = String(next.groqModel).trim();
-      if (this.config.groq.model !== model) {
+      if (!this.config.groq.modelLocked && this.config.groq.model !== model) {
         this.config.groq.model = model;
         llmConfigChanged = true;
       }
@@ -488,7 +490,7 @@ class VoicePipeline extends EventEmitter {
 
     if (next.cerebrasModel && String(next.cerebrasModel).trim()) {
       const model = String(next.cerebrasModel).trim();
-      if (this.config.cerebras.model !== model) {
+      if (!this.config.cerebras.modelLocked && this.config.cerebras.model !== model) {
         this.config.cerebras.model = model;
         llmConfigChanged = true;
       }
@@ -496,7 +498,7 @@ class VoicePipeline extends EventEmitter {
 
     if (next.sarvamModel && String(next.sarvamModel).trim()) {
       const model = String(next.sarvamModel).trim();
-      if (this.config.sarvam.model !== model) {
+      if (!this.config.sarvam.modelLocked && this.config.sarvam.model !== model) {
         this.config.sarvam.model = model;
         llmConfigChanged = true;
       }
@@ -504,7 +506,7 @@ class VoicePipeline extends EventEmitter {
 
     if (next.geminiModel && String(next.geminiModel).trim()) {
       const model = String(next.geminiModel).trim();
-      if (this.config.gemini.model !== model) {
+      if (!this.config.gemini.modelLocked && this.config.gemini.model !== model) {
         this.config.gemini.model = model;
         llmConfigChanged = true;
       }
@@ -660,6 +662,7 @@ class VoicePipeline extends EventEmitter {
 
     return {
       provider: this.activeProvider,
+      providerLocked: this.config.llm.providerLocked === true,
       sttLanguage: this.config.stt.languageCode,
       sttSampleRate: this.config.stt.sampleRate,
       sttInputAudioCodec: this.config.stt.inputAudioCodec,
@@ -667,9 +670,13 @@ class VoicePipeline extends EventEmitter {
       sttModel: this.config.stt.model,
       ttsSpeaker: this.config.tts.speaker,
       groqModel: this.config.groq.model,
+      groqModelLocked: this.config.groq.modelLocked === true,
       cerebrasModel: this.config.cerebras.model,
+      cerebrasModelLocked: this.config.cerebras.modelLocked === true,
       sarvamModel: this.config.sarvam.model,
+      sarvamModelLocked: this.config.sarvam.modelLocked === true,
       geminiModel: this.config.gemini.model,
+      geminiModelLocked: this.config.gemini.modelLocked === true,
       groqTemperature: this.config.groq.temperature,
       cerebrasTemperature: this.config.cerebras.temperature,
       sarvamTemperature: this.config.sarvam.temperature,
