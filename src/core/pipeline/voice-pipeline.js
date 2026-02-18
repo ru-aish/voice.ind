@@ -1879,7 +1879,7 @@ class VoicePipeline extends EventEmitter {
         if (abortSignal?.aborted) return;
         if (flushTimer) clearTimeout(flushTimer);
         flushTimer = setTimeout(() => {
-          const { chunk, remaining } = splitTimeoutSafeChunk(bufferedText, 3);
+          const { chunk, remaining } = splitTimeoutSafeChunk(bufferedText, 8);
           if (!chunk) return;
           bufferedText = remaining;
           enqueueFlush(chunk, 'timeout').catch((err) => {
