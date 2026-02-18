@@ -157,6 +157,16 @@ function defaultGreetingForLanguage(languageCode) {
   return 'Hello. I am Elevix IND voice assistant. How can I help you today?';
 }
 
+function isGenericFrontendGreeting(text) {
+  const value = String(text || '').trim().toLowerCase();
+  return (
+    value === '' ||
+    value === 'hello! how can i help you today?' ||
+    value === 'hello. how can i help you today?' ||
+    value === 'hello how can i help you today'
+  );
+}
+
 function isSarvamAllowedLanguageError(err) {
   const msg = String(err?.message || err || '').toLowerCase();
   return (
@@ -780,9 +790,10 @@ class VoicePipeline extends EventEmitter {
       }
     }
 
-    const greetingText =
-      String(this.sessionGreeting || '').trim() ||
-      defaultGreetingForLanguage(this.config.tts.languageCode);
+    const configuredGreeting = String(this.sessionGreeting || '').trim();
+    const greetingText = isGenericFrontendGreeting(configuredGreeting)
+      ? defaultGreetingForLanguage(this.config.tts.languageCode)
+      : configuredGreeting;
     if (!greetingText) return;
 
     const tts = await this.#ensureTtsClient();
