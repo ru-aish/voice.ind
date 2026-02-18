@@ -16,10 +16,12 @@ const { VadHandler } = require('../stt/vad-handler');
 
 const { GroqProvider } = require('../llm/groq-provider');
 const { CerebrasProvider } = require('../llm/cerebras-provider');
+const { SarvamProvider } = require('../llm/sarvam-provider');
+const { GeminiProvider } = require('../llm/gemini-provider');
 const { countTokensApprox } = require('../llm/types');
 
 const { SarvamTtsClient } = require('../tts/sarvam-tts-client');
-const { extractLineChunks } = require('../tts/audio-chunker');
+const { extractLineChunks, splitTimeoutSafeChunk } = require('../tts/audio-chunker');
 
 const { BargeInHandler, mergePrompts } = require('./barge-in-handler');
 const { LatencyTracker } = require('./latency-tracker');
@@ -33,6 +35,30 @@ function nowIso(ms) {
 function isAbortLikeError(err) {
   const msg = String(err?.message || err || '').toLowerCase();
   return msg.includes('abort');
+}
+
+function isTransientProviderError(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return (
+    msg.includes('429') ||
+    msg.includes('rate limit') ||
+    msg.includes('too many requests') ||
+    msg.includes('retry after') ||
+    msg.includes('resource exhausted') ||
+    msg.includes('overloaded') ||
+    msg.includes('high traffic') ||
+    msg.includes('temporarily unavailable') ||
+    msg.includes('service unavailable') ||
+    msg.includes('bad gateway') ||
+    msg.includes('gateway timeout') ||
+    msg.includes('timeout') ||
+    msg.includes('timed out') ||
+    msg.includes('fetch failed') ||
+    msg.includes('econnreset') ||
+    msg.includes('econnrefused') ||
+    msg.includes('enotfound') ||
+    msg.includes('eai_again')
+  );
 }
 
 function countWords(text) {
@@ -118,6 +144,27 @@ function buildLanguageConstraintInstruction(languageCode) {
   const label = languageLabel(languageCode);
   if (!label) return null;
   return `Respond only in ${label}. Do not switch to any other language/script.`;
+}
+
+function defaultGreetingForLanguage(languageCode) {
+  const normalized = String(languageCode || '').trim().toLowerCase();
+  if (normalized === 'gu-in' || normalized === 'gu') {
+    return 'નમસ્કાર. હું એલિવિક્સ એઆઈનો વોઇસ સહાયક છું. આજે હું તમારી કેવી રીતે મદદ કરી શકું?';
+  }
+  if (normalized === 'hi-in' || normalized === 'hi') {
+    return 'नमस्कार. मैं एलिविक्स एआई का वॉइस सहायक हूं. आज मैं आपकी कैसे मदद कर सकता हूं?';
+  }
+  return 'Hello. I am Elevix AI voice assistant. How can I help you today?';
+}
+
+function isGenericFrontendGreeting(text) {
+  const value = String(text || '').trim().toLowerCase();
+  return (
+    value === '' ||
+    value === 'hello! how can i help you today?' ||
+    value === 'hello. how can i help you today?' ||
+    value === 'hello how can i help you today'
+  );
 }
 
 function isSarvamAllowedLanguageError(err) {
@@ -214,6 +261,7 @@ class VoicePipeline extends EventEmitter {
     this.toolExecutor = new ToolExecutor();
 
     this.sttClient = null;
+    this.sttConnectPromise = null;
     this.ttsClient = null;
     this.providers = new Map();
 
@@ -242,7 +290,19 @@ class VoicePipeline extends EventEmitter {
 
   async start() {
     this.sessionStartedAtMs = Date.now();
-    await this.#connectSttClient();
+    try {
+      await this.#connectSttClient();
+    } catch (err) {
+      this.emit('metrics', {
+        type: 'stt_connect_init_failed',
+        atMs: Date.now(),
+        atIso: nowIso(Date.now()),
+      });
+      this.emit('error', {
+        error: `stt_connect_init_failed:${err?.message || err}`,
+      });
+      this.#ensureSttConnectedNonBlocking('start_init_failed');
+    }
 
     if (this.pendingTtsLanguageFallbackMetric) {
       this.emit('metrics', this.pendingTtsLanguageFallbackMetric);
@@ -256,6 +316,7 @@ class VoicePipeline extends EventEmitter {
       runtimeTag: 'voice-ai-2026-02-14-r6',
       provider: this.activeProvider,
       sttLanguage: this.config.stt.languageCode,
+      sttConnected: Boolean(this.sttClient?.connected),
       ttsLanguage: this.config.tts.languageCode,
       sampleRate: this.config.stt.sampleRate,
     });
@@ -282,8 +343,9 @@ class VoicePipeline extends EventEmitter {
     }
 
     if (this.sttClient) {
-      await this.sttClient.close();
+      const currentStt = this.sttClient;
       this.sttClient = null;
+      await currentStt.close();
     }
 
     if (this.ttsClient) {
@@ -316,8 +378,12 @@ class VoicePipeline extends EventEmitter {
       return Math.round(parsed);
     };
 
-    if (next.provider && ['groq', 'cerebras'].includes(String(next.provider).toLowerCase())) {
-      this.activeProvider = String(next.provider).toLowerCase();
+    const validSttCodecs = new Set(['wav', 'pcm_s16le', 'pcm_l16', 'pcm_raw']);
+
+    if (next.provider && ['groq', 'cerebras', 'sarvam', 'gemini'].includes(String(next.provider).toLowerCase())) {
+      if (!this.config.llm.providerLocked) {
+        this.activeProvider = String(next.provider).toLowerCase();
+      }
     }
 
     if (next.language && String(next.language).trim()) {
@@ -354,6 +420,28 @@ class VoicePipeline extends EventEmitter {
       }
     }
 
+    const sttSampleRate = parseBoundedInt(next.sttSampleRate, 8000, 48000);
+    if (sttSampleRate !== null && this.config.stt.sampleRate !== sttSampleRate) {
+      this.config.stt.sampleRate = sttSampleRate;
+      restartStt = true;
+    }
+
+    if (next.sttInputAudioCodec && String(next.sttInputAudioCodec).trim()) {
+      const codec = String(next.sttInputAudioCodec).trim().toLowerCase();
+      if (validSttCodecs.has(codec) && this.config.stt.inputAudioCodec !== codec) {
+        this.config.stt.inputAudioCodec = codec;
+        restartStt = true;
+      }
+    }
+
+    if (next.sttEncoding && String(next.sttEncoding).trim()) {
+      const encoding = String(next.sttEncoding).trim();
+      if (this.config.stt.encoding !== encoding) {
+        this.config.stt.encoding = encoding;
+        restartStt = true;
+      }
+    }
+
     if (next.ttsLanguage && String(next.ttsLanguage).trim()) {
       const requestedTtsLang = canonicalLanguageCode(next.ttsLanguage);
       const resolvedTtsLanguage = resolveTtsLanguageCode(
@@ -385,17 +473,29 @@ class VoicePipeline extends EventEmitter {
       if (promptText) {
         this.config.groq.systemPrompt = promptText;
         this.config.cerebras.systemPrompt = promptText;
+        this.config.sarvam.systemPrompt = promptText;
+        this.config.gemini.systemPrompt = promptText;
       }
     }
 
     if (next.model && String(next.model).trim()) {
       const model = String(next.model).trim();
       if (this.activeProvider === 'cerebras') {
-        if (this.config.cerebras.model !== model) {
+        if (!this.config.cerebras.modelLocked && this.config.cerebras.model !== model) {
           this.config.cerebras.model = model;
           llmConfigChanged = true;
         }
-      } else if (this.config.groq.model !== model) {
+      } else if (this.activeProvider === 'sarvam') {
+        if (!this.config.sarvam.modelLocked && this.config.sarvam.model !== model) {
+          this.config.sarvam.model = model;
+          llmConfigChanged = true;
+        }
+      } else if (this.activeProvider === 'gemini') {
+        if (!this.config.gemini.modelLocked && this.config.gemini.model !== model) {
+          this.config.gemini.model = model;
+          llmConfigChanged = true;
+        }
+      } else if (!this.config.groq.modelLocked && this.config.groq.model !== model) {
         this.config.groq.model = model;
         llmConfigChanged = true;
       }
@@ -403,7 +503,7 @@ class VoicePipeline extends EventEmitter {
 
     if (next.groqModel && String(next.groqModel).trim()) {
       const model = String(next.groqModel).trim();
-      if (this.config.groq.model !== model) {
+      if (!this.config.groq.modelLocked && this.config.groq.model !== model) {
         this.config.groq.model = model;
         llmConfigChanged = true;
       }
@@ -411,8 +511,24 @@ class VoicePipeline extends EventEmitter {
 
     if (next.cerebrasModel && String(next.cerebrasModel).trim()) {
       const model = String(next.cerebrasModel).trim();
-      if (this.config.cerebras.model !== model) {
+      if (!this.config.cerebras.modelLocked && this.config.cerebras.model !== model) {
         this.config.cerebras.model = model;
+        llmConfigChanged = true;
+      }
+    }
+
+    if (next.sarvamModel && String(next.sarvamModel).trim()) {
+      const model = String(next.sarvamModel).trim();
+      if (!this.config.sarvam.modelLocked && this.config.sarvam.model !== model) {
+        this.config.sarvam.model = model;
+        llmConfigChanged = true;
+      }
+    }
+
+    if (next.geminiModel && String(next.geminiModel).trim()) {
+      const model = String(next.geminiModel).trim();
+      if (!this.config.gemini.modelLocked && this.config.gemini.model !== model) {
+        this.config.gemini.model = model;
         llmConfigChanged = true;
       }
     }
@@ -422,6 +538,16 @@ class VoicePipeline extends EventEmitter {
       if (this.activeProvider === 'cerebras') {
         if (this.config.cerebras.temperature !== activeTemperature) {
           this.config.cerebras.temperature = activeTemperature;
+          llmConfigChanged = true;
+        }
+      } else if (this.activeProvider === 'sarvam') {
+        if (this.config.sarvam.temperature !== activeTemperature) {
+          this.config.sarvam.temperature = activeTemperature;
+          llmConfigChanged = true;
+        }
+      } else if (this.activeProvider === 'gemini') {
+        if (this.config.gemini.temperature !== activeTemperature) {
+          this.config.gemini.temperature = activeTemperature;
           llmConfigChanged = true;
         }
       } else if (this.config.groq.temperature !== activeTemperature) {
@@ -442,6 +568,18 @@ class VoicePipeline extends EventEmitter {
       llmConfigChanged = true;
     }
 
+    const sarvamTemperature = parseBounded(next.sarvamTemperature, 0, 2);
+    if (sarvamTemperature !== null && this.config.sarvam.temperature !== sarvamTemperature) {
+      this.config.sarvam.temperature = sarvamTemperature;
+      llmConfigChanged = true;
+    }
+
+    const geminiTemperature = parseBounded(next.geminiTemperature, 0, 2);
+    if (geminiTemperature !== null && this.config.gemini.temperature !== geminiTemperature) {
+      this.config.gemini.temperature = geminiTemperature;
+      llmConfigChanged = true;
+    }
+
     const activeMaxTokens = parseBoundedInt(
       next.maxCompletionTokens ?? next.maxTokens,
       32,
@@ -451,6 +589,16 @@ class VoicePipeline extends EventEmitter {
       if (this.activeProvider === 'cerebras') {
         if (this.config.cerebras.maxCompletionTokens !== activeMaxTokens) {
           this.config.cerebras.maxCompletionTokens = activeMaxTokens;
+          llmConfigChanged = true;
+        }
+      } else if (this.activeProvider === 'sarvam') {
+        if (this.config.sarvam.maxCompletionTokens !== activeMaxTokens) {
+          this.config.sarvam.maxCompletionTokens = activeMaxTokens;
+          llmConfigChanged = true;
+        }
+      } else if (this.activeProvider === 'gemini') {
+        if (this.config.gemini.maxCompletionTokens !== activeMaxTokens) {
+          this.config.gemini.maxCompletionTokens = activeMaxTokens;
           llmConfigChanged = true;
         }
       } else if (this.config.groq.maxCompletionTokens !== activeMaxTokens) {
@@ -472,6 +620,36 @@ class VoicePipeline extends EventEmitter {
     ) {
       this.config.cerebras.maxCompletionTokens = cerebrasMaxTokens;
       llmConfigChanged = true;
+    }
+
+    const sarvamMaxTokens = parseBoundedInt(next.sarvamMaxTokens, 32, 8192);
+    if (
+      sarvamMaxTokens !== null &&
+      this.config.sarvam.maxCompletionTokens !== sarvamMaxTokens
+    ) {
+      this.config.sarvam.maxCompletionTokens = sarvamMaxTokens;
+      llmConfigChanged = true;
+    }
+
+    const geminiMaxTokens = parseBoundedInt(next.geminiMaxTokens, 32, 8192);
+    if (
+      geminiMaxTokens !== null &&
+      this.config.gemini.maxCompletionTokens !== geminiMaxTokens
+    ) {
+      this.config.gemini.maxCompletionTokens = geminiMaxTokens;
+      llmConfigChanged = true;
+    }
+
+    const contextMaxTurns = parseBoundedInt(next.contextMaxTurns, 1, 5000);
+    if (contextMaxTurns !== null && this.config.pipeline.contextMaxTurns !== contextMaxTurns) {
+      this.config.pipeline.contextMaxTurns = contextMaxTurns;
+      this.#pruneContextHistory();
+    }
+
+    const contextMaxChars = parseBoundedInt(next.contextMaxChars, 2000, 500000);
+    if (contextMaxChars !== null && this.config.pipeline.contextMaxChars !== contextMaxChars) {
+      this.config.pipeline.contextMaxChars = contextMaxChars;
+      this.#pruneContextHistory();
     }
 
     if (next.greeting) {
@@ -498,40 +676,86 @@ class VoicePipeline extends EventEmitter {
         provider: this.activeProvider,
         groqModel: this.config.groq.model,
         cerebrasModel: this.config.cerebras.model,
+        sarvamModel: this.config.sarvam.model,
+        geminiModel: this.config.gemini.model,
       });
     }
 
     return {
       provider: this.activeProvider,
+      providerLocked: this.config.llm.providerLocked === true,
       sttLanguage: this.config.stt.languageCode,
+      sttSampleRate: this.config.stt.sampleRate,
+      sttInputAudioCodec: this.config.stt.inputAudioCodec,
       ttsLanguage: this.config.tts.languageCode,
       sttModel: this.config.stt.model,
       ttsSpeaker: this.config.tts.speaker,
       groqModel: this.config.groq.model,
+      groqModelLocked: this.config.groq.modelLocked === true,
       cerebrasModel: this.config.cerebras.model,
+      cerebrasModelLocked: this.config.cerebras.modelLocked === true,
+      sarvamModel: this.config.sarvam.model,
+      sarvamModelLocked: this.config.sarvam.modelLocked === true,
+      geminiModel: this.config.gemini.model,
+      geminiModelLocked: this.config.gemini.modelLocked === true,
       groqTemperature: this.config.groq.temperature,
       cerebrasTemperature: this.config.cerebras.temperature,
+      sarvamTemperature: this.config.sarvam.temperature,
+      geminiTemperature: this.config.gemini.temperature,
       groqMaxTokens: this.config.groq.maxCompletionTokens,
       cerebrasMaxTokens: this.config.cerebras.maxCompletionTokens,
+      sarvamMaxTokens: this.config.sarvam.maxCompletionTokens,
+      geminiMaxTokens: this.config.gemini.maxCompletionTokens,
+      contextMaxTurns: this.config.pipeline.contextMaxTurns,
+      contextMaxChars: this.config.pipeline.contextMaxChars,
       contextTurns: this.#currentContextTurns(),
-      systemPrompt: this.config.groq.systemPrompt ? 'configured' : 'default',
+      systemPrompt:
+        this.config.groq.systemPrompt ||
+        this.config.cerebras.systemPrompt ||
+        this.config.sarvam.systemPrompt ||
+        this.config.gemini.systemPrompt
+          ? 'configured'
+          : 'default',
       greeting: this.sessionGreeting || 'none',
     };
   }
 
   handleAudioChunk(audioBase64OrBuffer) {
-    if (!this.sttClient) {
-      throw new Error('STT client is not initialized');
+    const sttConnected = this.#ensureSttConnectedNonBlocking('audio_chunk');
+    if (!sttConnected) {
+      this.emit('metrics', {
+        type: 'stt_audio_dropped',
+        reason: 'stt_not_connected',
+      });
+      return;
     }
 
     if (Buffer.isBuffer(audioBase64OrBuffer) || audioBase64OrBuffer instanceof Uint8Array) {
-      this.sttClient.sendAudioBuffer(audioBase64OrBuffer);
+      try {
+        this.sttClient.sendAudioBuffer(audioBase64OrBuffer);
+      } catch (err) {
+        this.emit('metrics', {
+          type: 'stt_audio_dropped',
+          reason: 'stt_send_failed',
+        });
+        this.emit('error', { error: `stt_socket_error: ${err?.message || err}` });
+        this.#ensureSttConnectedNonBlocking('send_audio_buffer_failed');
+      }
       return;
     }
 
     const audioBase64 = String(audioBase64OrBuffer || '').trim();
     if (!audioBase64) return;
-    this.sttClient.sendAudioBase64(audioBase64);
+    try {
+      this.sttClient.sendAudioBase64(audioBase64);
+    } catch (err) {
+      this.emit('metrics', {
+        type: 'stt_audio_dropped',
+        reason: 'stt_send_failed',
+      });
+      this.emit('error', { error: `stt_socket_error: ${err?.message || err}` });
+      this.#ensureSttConnectedNonBlocking('send_audio_base64_failed');
+    }
   }
 
   handleTextInput(text) {
@@ -555,6 +779,53 @@ class VoicePipeline extends EventEmitter {
     this.#dispatchTurn(prompt, Date.now(), 'text_input');
   }
 
+  async handleGreetingRequest(languageCode = '') {
+    const requestedTts = canonicalLanguageCode(languageCode) || this.config.tts.languageCode;
+    const resolvedTtsLanguage = resolveTtsLanguageCode(requestedTts, this.config.tts.languageCode);
+    if (resolvedTtsLanguage.languageCode !== this.config.tts.languageCode) {
+      this.config.tts.languageCode = resolvedTtsLanguage.languageCode;
+      if (this.ttsClient) {
+        await this.ttsClient.close();
+        this.ttsClient = null;
+      }
+    }
+
+    const configuredGreeting = String(this.sessionGreeting || '').trim();
+    const greetingText = isGenericFrontendGreeting(configuredGreeting)
+      ? defaultGreetingForLanguage(this.config.tts.languageCode)
+      : configuredGreeting;
+    if (!greetingText) return;
+
+    const tts = await this.#ensureTtsClient();
+    const greetingRequestId = -1;
+    const greetingSegmentIndex = 1;
+    const startMs = Date.now();
+    const ttsResult = await tts.speakText(greetingText, {
+      onAudioChunk: ({ base64, atMs }) => {
+        this.emit('audio', {
+          requestId: greetingRequestId,
+          provider: 'system',
+          segmentIndex: greetingSegmentIndex,
+          audioBase64: base64,
+          atMs,
+          atIso: nowIso(atMs),
+        });
+      },
+    });
+
+    this.emit('metrics', {
+      type: 'session_greeting_sent',
+      requestId: greetingRequestId,
+      provider: 'system',
+      ttsLanguage: this.config.tts.languageCode,
+      textChars: greetingText.length,
+      sentAtMs: ttsResult.sentAtMs,
+      firstChunkAtMs: ttsResult.firstAudioAtMs,
+      totalTtsMs: ttsResult.totalTtsMs,
+      wallMs: Math.max(0, Date.now() - startMs),
+    });
+  }
+
   abortCurrent(reason = 'client_abort') {
     const dropped = this.#markInFlightDropped(reason);
     if (dropped) {
@@ -569,56 +840,105 @@ class VoicePipeline extends EventEmitter {
 
   async #connectSttClient(forceReconnect = false) {
     if (forceReconnect && this.sttClient) {
-      await this.sttClient.close();
+      const staleClient = this.sttClient;
       this.sttClient = null;
+      await staleClient.close();
     }
 
-    if (this.sttClient) return;
+    if (this.sttClient?.connected) return;
+    if (this.sttConnectPromise) {
+      await this.sttConnectPromise;
+      return;
+    }
 
-    this.sttClient = new SarvamSttClient({
-      apiKey: this.config.keys.sarvamApiKey,
-      model: this.config.stt.model,
-      languageCode: this.config.stt.languageCode,
-      sampleRate: this.config.stt.sampleRate,
-      inputAudioCodec: this.config.stt.inputAudioCodec,
-      encoding: this.config.stt.encoding,
-      highVadSensitivity: this.config.stt.highVadSensitivity,
-      vadSignals: this.config.stt.vadSignals,
-      flushSignal: this.config.stt.flushSignal,
-    });
-
-    this.sttClient.on('first_chunk_sent', ({ atMs }) => {
-      this.emit('metrics', {
-        type: 'stt_first_chunk_sent',
-        atMs,
-        atIso: nowIso(atMs),
+    const connectPromise = (async () => {
+      const sttClient = new SarvamSttClient({
+        apiKey: this.config.keys.sarvamApiKey,
+        model: this.config.stt.model,
+        languageCode: this.config.stt.languageCode,
+        sampleRate: this.config.stt.sampleRate,
+        inputAudioCodec: this.config.stt.inputAudioCodec,
+        encoding: this.config.stt.encoding,
+        highVadSensitivity: this.config.stt.highVadSensitivity,
+        vadSignals: this.config.stt.vadSignals,
+        flushSignal: this.config.stt.flushSignal,
       });
-    });
+      this.sttClient = sttClient;
 
-    this.sttClient.on('first_message', (metrics) => {
-      this.emit('metrics', {
-        type: 'stt_first_message_latency',
-        ...metrics,
-        atIso: nowIso(metrics.atMs),
+      sttClient.on('first_chunk_sent', ({ atMs }) => {
+        if (this.sttClient !== sttClient) return;
+        this.emit('metrics', {
+          type: 'stt_first_chunk_sent',
+          atMs,
+          atIso: nowIso(atMs),
+        });
       });
-    });
 
-    this.sttClient.on('message', (response) => {
-      this.#handleSttMessage(response);
-    });
-
-    this.sttClient.on('error', (err) => {
-      this.emit('error', { error: `stt_socket_error: ${err?.message || err}` });
-    });
-
-    this.sttClient.on('close', (event) => {
-      this.emit('metrics', {
-        type: 'stt_socket_closed',
-        code: event?.code ?? null,
+      sttClient.on('first_message', (metrics) => {
+        if (this.sttClient !== sttClient) return;
+        this.emit('metrics', {
+          type: 'stt_first_message_latency',
+          ...metrics,
+          atIso: nowIso(metrics.atMs),
+        });
       });
+
+      sttClient.on('message', (response) => {
+        if (this.sttClient !== sttClient) return;
+        this.#handleSttMessage(response);
+      });
+
+      sttClient.on('error', (err) => {
+        if (this.sttClient !== sttClient) return;
+        this.emit('error', { error: `stt_socket_error: ${err?.message || err}` });
+      });
+
+      sttClient.on('close', (event) => {
+        if (this.sttClient !== sttClient) return;
+        this.sttClient = null;
+        this.emit('metrics', {
+          type: 'stt_socket_closed',
+          code: event?.code ?? null,
+        });
+        this.#ensureSttConnectedNonBlocking('stt_socket_closed');
+      });
+
+      await sttClient.connect();
+      this.emit('metrics', {
+        type: 'stt_socket_open',
+      });
+    })();
+
+    this.sttConnectPromise = connectPromise;
+    try {
+      await connectPromise;
+    } finally {
+      if (this.sttConnectPromise === connectPromise) {
+        this.sttConnectPromise = null;
+      }
+    }
+  }
+
+  #ensureSttConnectedNonBlocking(source = 'unknown') {
+    if (this.stopped) return false;
+
+    if (this.sttClient?.connected) {
+      return true;
+    }
+
+    if (this.sttConnectPromise) {
+      return false;
+    }
+
+    this.emit('metrics', {
+      type: 'stt_reconnect_attempt',
+      source,
     });
 
-    await this.sttClient.connect();
+    this.#connectSttClient(true).catch((err) => {
+      this.emit('error', { error: `stt_reconnect_error: ${err?.message || err}` });
+    });
+    return false;
   }
 
   async #ensureTtsClient() {
@@ -645,8 +965,61 @@ class VoicePipeline extends EventEmitter {
     return this.ttsClient;
   }
 
+  #isTraceEnabled() {
+    return Boolean(this.config.pipeline.traceFull || this.config.server.logLevel === 'debug');
+  }
+
+  #emitTrace(eventType, payload = {}) {
+    if (!this.#isTraceEnabled()) return;
+    const atMs = Date.now();
+    this.emit('metrics', {
+      type: `trace_${eventType}`,
+      atMs,
+      atIso: nowIso(atMs),
+      ...payload,
+    });
+  }
+
+  #providerRuntimeConfig(providerName) {
+    if (providerName === 'cerebras') {
+      return {
+        model: this.config.cerebras.model,
+        temperature: this.config.cerebras.temperature,
+        maxCompletionTokens: this.config.cerebras.maxCompletionTokens,
+        topP: this.config.cerebras.topP,
+        reasoningEffort: this.config.cerebras.reasoningEffort,
+      };
+    }
+    if (providerName === 'sarvam') {
+      return {
+        model: this.config.sarvam.model,
+        temperature: this.config.sarvam.temperature,
+        maxCompletionTokens: this.config.sarvam.maxCompletionTokens,
+        topP: this.config.sarvam.topP,
+        reasoningEffort: this.config.sarvam.reasoningEffort,
+      };
+    }
+    if (providerName === 'gemini') {
+      return {
+        model: this.config.gemini.model,
+        temperature: this.config.gemini.temperature,
+        maxCompletionTokens: this.config.gemini.maxCompletionTokens,
+        topP: this.config.gemini.topP,
+        reasoningEffort: null,
+      };
+    }
+    return {
+      model: this.config.groq.model,
+      temperature: this.config.groq.temperature,
+      maxCompletionTokens: this.config.groq.maxCompletionTokens,
+      topP: this.config.groq.topP,
+      reasoningEffort: this.config.groq.reasoningEffort,
+    };
+  }
+
   #getProvider(providerName) {
-    const normalized = providerName === 'cerebras' ? 'cerebras' : 'groq';
+    const validProviders = ['cerebras', 'groq', 'sarvam', 'gemini'];
+    const normalized = validProviders.includes(providerName) ? providerName : 'gemini';
     if (this.providers.has(normalized)) {
       return this.providers.get(normalized);
     }
@@ -663,6 +1036,27 @@ class VoicePipeline extends EventEmitter {
         stop: this.config.cerebras.stop,
         allowReasoningFallback: this.config.cerebras.allowReasoningFallback,
         systemPrompt: this.config.cerebras.systemPrompt,
+      });
+    } else if (normalized === 'gemini') {
+      provider = new GeminiProvider({
+        apiKey: this.config.keys.geminiApiKey,
+        model: this.config.gemini.model,
+        temperature: this.config.gemini.temperature,
+        maxCompletionTokens: this.config.gemini.maxCompletionTokens,
+        topP: this.config.gemini.topP,
+        stop: this.config.gemini.stop,
+        systemPrompt: this.config.gemini.systemPrompt,
+      });
+    } else if (normalized === 'sarvam') {
+      provider = new SarvamProvider({
+        apiKey: this.config.keys.sarvamApiKey,
+        model: this.config.sarvam.model,
+        temperature: this.config.sarvam.temperature,
+        maxCompletionTokens: this.config.sarvam.maxCompletionTokens,
+        topP: this.config.sarvam.topP,
+        reasoningEffort: this.config.sarvam.reasoningEffort,
+        stop: this.config.sarvam.stop,
+        systemPrompt: this.config.sarvam.systemPrompt,
       });
     } else {
       provider = new GroqProvider({
@@ -851,10 +1245,16 @@ class VoicePipeline extends EventEmitter {
   #buildContextMessages(prompt) {
     const messages = [];
     const providerName = this.activeProvider;
-    const baseSystemPrompt =
-      providerName === 'cerebras'
-        ? this.config.cerebras.systemPrompt
-        : this.config.groq.systemPrompt;
+    let baseSystemPrompt;
+    if (providerName === 'cerebras') {
+      baseSystemPrompt = this.config.cerebras.systemPrompt;
+    } else if (providerName === 'sarvam') {
+      baseSystemPrompt = this.config.sarvam.systemPrompt;
+    } else if (providerName === 'gemini') {
+      baseSystemPrompt = this.config.gemini.systemPrompt;
+    } else {
+      baseSystemPrompt = this.config.groq.systemPrompt;
+    }
     const languageInstruction = buildLanguageConstraintInstruction(this.config.tts.languageCode);
 
     const systemParts = [];
@@ -1183,8 +1583,66 @@ class VoicePipeline extends EventEmitter {
       providerSendAtIso: nowIso(sendAtMs),
       detectionEndToProviderSendMs,
     });
+    this.#emitTrace('turn_dispatch', {
+      requestId,
+      provider,
+      reason,
+      detectionEndedAtMs,
+      providerSendAtMs: sendAtMs,
+      prompt,
+      promptChars: prompt.length,
+      promptWords: promptWordCount,
+    });
 
     this.#runProviderTurn(prompt, provider, requestId, detectionEndedAtMs, abortController.signal)
+      .catch(async (primaryErr) => {
+        const shouldFallbackToGroq =
+          provider !== 'groq' &&
+          isTransientProviderError(primaryErr) &&
+          !isAbortLikeError(primaryErr) &&
+          !this.bargeIn.isDropped(requestId);
+
+        if (!shouldFallbackToGroq) {
+          throw primaryErr;
+        }
+
+        this.emit('metrics', {
+          type: 'provider_fallback_attempt',
+          requestId,
+          fromProvider: provider,
+          toProvider: 'groq',
+          reason: 'primary_provider_transient_error',
+          errorPreview: previewText(String(primaryErr?.message || primaryErr || '')),
+        });
+
+        try {
+          const summary = await this.#runProviderTurn(
+            prompt,
+            'groq',
+            requestId,
+            detectionEndedAtMs,
+            abortController.signal
+          );
+          this.emit('metrics', {
+            type: 'provider_fallback_success',
+            requestId,
+            fromProvider: provider,
+            toProvider: 'groq',
+          });
+          return summary;
+        } catch (fallbackErr) {
+          this.emit('metrics', {
+            type: 'provider_fallback_failed',
+            requestId,
+            fromProvider: provider,
+            toProvider: 'groq',
+            fallbackErrorPreview: previewText(String(fallbackErr?.message || fallbackErr || '')),
+          });
+          throw new Error(
+            `primary_provider_error:${primaryErr?.message || primaryErr}; fallback_provider_error:${fallbackErr?.message || fallbackErr}`
+          );
+        }
+      })
       .then((summary) => {
         this.bargeIn.markSettled(requestId);
 
@@ -1543,6 +2001,11 @@ class VoicePipeline extends EventEmitter {
         };
 
         tracker.addSegment(segment);
+        this.#emitTrace('tts_segment', {
+          requestId,
+          provider: providerName,
+          segment,
+        });
       };
 
       const enqueueFlush = (text, reason) => {
@@ -1563,7 +2026,10 @@ class VoicePipeline extends EventEmitter {
         if (abortSignal?.aborted) return;
         if (flushTimer) clearTimeout(flushTimer);
         flushTimer = setTimeout(() => {
-          drainBuffered('timeout').catch((err) => {
+          const { chunk, remaining } = splitTimeoutSafeChunk(bufferedText, 8);
+          if (!chunk) return;
+          bufferedText = remaining;
+          enqueueFlush(chunk, 'timeout').catch((err) => {
             if (abortSignal?.aborted || isAbortLikeError(err)) return;
             if (isSarvamAllowedLanguageError(err) || isAnyTtsError(err)) return;
             this.emit('error', {
@@ -1634,6 +2100,16 @@ class VoicePipeline extends EventEmitter {
         });
       }
 
+      this.#emitTrace('llm_stream_iteration_complete', {
+        requestId,
+        provider: providerName,
+        iteration,
+        generatedText: String(providerMetrics?.generatedText || ''),
+        finishReason: providerMetrics?.finishReason || null,
+        tokenCountApprox: providerMetrics?.tokenCountApprox ?? null,
+        toolCalls: providerMetrics?.toolCalls || [],
+      });
+
       return {
         providerMetrics,
         toolCalls: accumulatedToolCalls,
@@ -1649,6 +2125,14 @@ class VoicePipeline extends EventEmitter {
       messages: contextMessages.length,
       turns: this.#currentContextTurns(),
       promptChars: String(prompt || '').length,
+    });
+    this.#emitTrace('llm_request', {
+      requestId,
+      provider: providerName,
+      prompt,
+      contextMessages,
+      providerConfig: this.#providerRuntimeConfig(providerName),
+      toolsEnabled,
     });
 
     let currentMessages = contextMessages;
@@ -1705,13 +2189,29 @@ class VoicePipeline extends EventEmitter {
         configuredMaxTokens:
           providerName === 'cerebras'
             ? this.config.cerebras.maxCompletionTokens
+            : providerName === 'sarvam'
+              ? this.config.sarvam.maxCompletionTokens
+              : providerName === 'gemini'
+                ? this.config.gemini.maxCompletionTokens
             : this.config.groq.maxCompletionTokens,
       });
     }
 
     throwIfAborted();
+    const completed = tracker.complete(finalProviderMetrics?.tpsApprox);
+    this.#emitTrace('llm_turn_complete', {
+      requestId,
+      provider: providerName,
+      finalMetrics: {
+        finishReason: finalProviderMetrics?.finishReason || null,
+        tokenCountApprox: finalProviderMetrics?.tokenCountApprox ?? null,
+        generatedText: String(finalProviderMetrics?.generatedText || ''),
+        toolCalls: finalProviderMetrics?.toolCalls || [],
+      },
+      latency: completed,
+    });
 
-    return tracker.complete(finalProviderMetrics?.tpsApprox);
+    return completed;
   }
 
   #handleSttMessage(response) {
@@ -1794,6 +2294,13 @@ class VoicePipeline extends EventEmitter {
           isFinal: transcriptIsFinal,
           speechActive: this.vad.speechActive,
           segmentIndex: this.vad.activeSegment?.segmentIndex || this.pendingEndedSegment?.segmentIndex || null,
+        });
+        this.#emitTrace('stt_transcript', {
+          transcript: transcriptNormalized,
+          isFinal: transcriptIsFinal,
+          speechActive: this.vad.speechActive,
+          segmentIndex:
+            this.vad.activeSegment?.segmentIndex || this.pendingEndedSegment?.segmentIndex || null,
         });
       }
     }

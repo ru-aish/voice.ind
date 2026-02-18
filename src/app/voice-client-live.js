@@ -57,9 +57,11 @@ if (hasFlag('--help') || hasFlag('-h')) {
   npm run voice:client
   npm run voice:client -- --provider=groq --language=gu-IN
   npm run voice:client -- --provider=cerebras --language=hi-IN --verbose
+  npm run voice:client -- --provider=gemini --language=en-IN
+  npm run voice:client -- --provider=sarvam --language=gu-IN
 
 Options:
-  --provider=groq|cerebras
+  --provider=groq|cerebras|gemini|sarvam
   --language=hi-IN|gu-IN|en-IN
   --tts-language=hi-IN|en-IN|gu-IN
   --no-speaker

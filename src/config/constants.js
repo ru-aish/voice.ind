@@ -8,7 +8,7 @@ const DEFAULTS = {
     model: 'saaras:v3',
     languageCode: 'gu-IN',
     sampleRate: 16000,
-    inputAudioCodec: 'wav',
+    inputAudioCodec: 'pcm_s16le',
     encoding: 'audio/wav',
     highVadSensitivity: true,
     vadSignals: true,
@@ -29,7 +29,7 @@ const DEFAULTS = {
   },
 
   llm: {
-    provider: 'groq',
+    provider: 'gemini',
   },
 
   pipeline: {
@@ -51,11 +51,12 @@ const DEFAULTS = {
     skipEndAfterLiveDispatch: true,
     dedupRepeatedTranscript: true,
     contextEnabled: true,
-    contextMaxTurns: 500,
-    contextMaxChars: 4000,
+    contextMaxTurns: 1200,
+    contextMaxChars: 120000,
     streamDebug: true,
     streamDebugMaxPreviews: 2,
     streamDebugPreviewChars: 220,
+    traceFull: false,
     ttsSanitize: true,
     echoGuardEnabled: true,
     echoGuardMinChars: 4,
@@ -69,8 +70,8 @@ const DEFAULTS = {
   },
 
   groq: {
-    model: 'openai/gpt-oss-20b',
-    temperature: 0.2,
+    model: 'openai/gpt-oss-120b',
+    temperature: 1,
     maxCompletionTokens: 2000,
     topP: 1,
     reasoningEffort: 'low',
@@ -90,6 +91,25 @@ const DEFAULTS = {
     systemPrompt: '',
   },
 
+  sarvam: {
+    model: 'sarvam-m:low',
+    temperature: 0.2,
+    maxCompletionTokens: 2000,
+    topP: 1,
+    reasoningEffort: 'low',
+    stop: null,
+    systemPrompt: '',
+  },
+
+  gemini: {
+    model: 'gemini-flash-lite-latest',
+    temperature: 1,
+    maxCompletionTokens: 8000,
+    topP: 1,
+    stop: null,
+    systemPrompt: '',
+  },
+
   tools: {
     enabled: true,
     maxIterations: 3,
@@ -103,6 +123,7 @@ const VAD_SIGNALS = {
 
 const WS_MESSAGE_TYPES = {
   AUDIO: 'audio',
+  GREET: 'greet',
   TEXT: 'text',
   CONFIG: 'config',
   ABORT: 'abort',
