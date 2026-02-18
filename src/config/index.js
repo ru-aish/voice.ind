@@ -132,7 +132,6 @@ function loadConfig() {
       ),
       providerLocked: Boolean(
         parseBool(process.env.VOICE_PIPELINE_PROVIDER_LOCKED, false) ||
-          normalizeProvider(process.env.VOICE_PIPELINE_PROVIDER) ||
           normalizeProvider(process.env.LLM_PROVIDER)
       ),
     },
@@ -260,7 +259,7 @@ function loadConfig() {
 
     groq: {
       model: process.env.GROQ_MODEL || DEFAULTS.groq.model,
-      modelLocked: Boolean(String(process.env.GROQ_MODEL || '').trim()),
+      modelLocked: parseBool(process.env.GROQ_MODEL_LOCKED, false),
       temperature: parseNum(process.env.GROQ_TEMPERATURE, DEFAULTS.groq.temperature),
       maxCompletionTokens: parseNum(
         process.env.GROQ_MAX_TOKENS,
@@ -281,7 +280,7 @@ function loadConfig() {
 
     cerebras: {
       model: process.env.CEREBRAS_MODEL || DEFAULTS.cerebras.model,
-      modelLocked: Boolean(String(process.env.CEREBRAS_MODEL || '').trim()),
+      modelLocked: parseBool(process.env.CEREBRAS_MODEL_LOCKED, false),
       temperature: parseNum(
         process.env.CEREBRAS_TEMPERATURE,
         DEFAULTS.cerebras.temperature
@@ -306,7 +305,7 @@ function loadConfig() {
 
     sarvam: {
       model: process.env.SARVAM_LLM_MODEL || DEFAULTS.sarvam.model,
-      modelLocked: Boolean(String(process.env.SARVAM_LLM_MODEL || '').trim()),
+      modelLocked: parseBool(process.env.SARVAM_LLM_MODEL_LOCKED, false),
       temperature: parseNum(
         process.env.SARVAM_LLM_TEMPERATURE,
         DEFAULTS.sarvam.temperature
@@ -326,7 +325,7 @@ function loadConfig() {
 
     gemini: {
       model: process.env.GEMINI_MODEL || DEFAULTS.gemini.model,
-      modelLocked: Boolean(String(process.env.GEMINI_MODEL || '').trim()),
+      modelLocked: parseBool(process.env.GEMINI_MODEL_LOCKED, false),
       temperature: parseNum(process.env.GEMINI_TEMPERATURE, DEFAULTS.gemini.temperature),
       maxCompletionTokens: parseNum(
         process.env.GEMINI_MAX_TOKENS,
