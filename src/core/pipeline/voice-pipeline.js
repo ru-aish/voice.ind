@@ -37,6 +37,30 @@ function isAbortLikeError(err) {
   return msg.includes('abort');
 }
 
+function isTransientProviderError(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return (
+    msg.includes('429') ||
+    msg.includes('rate limit') ||
+    msg.includes('too many requests') ||
+    msg.includes('retry after') ||
+    msg.includes('resource exhausted') ||
+    msg.includes('overloaded') ||
+    msg.includes('high traffic') ||
+    msg.includes('temporarily unavailable') ||
+    msg.includes('service unavailable') ||
+    msg.includes('bad gateway') ||
+    msg.includes('gateway timeout') ||
+    msg.includes('timeout') ||
+    msg.includes('timed out') ||
+    msg.includes('fetch failed') ||
+    msg.includes('econnreset') ||
+    msg.includes('econnrefused') ||
+    msg.includes('enotfound') ||
+    msg.includes('eai_again')
+  );
+}
+
 function countWords(text) {
   return String(text || '')
     .trim()
@@ -1496,6 +1520,54 @@ class VoicePipeline extends EventEmitter {
     });
 
     this.#runProviderTurn(prompt, provider, requestId, detectionEndedAtMs, abortController.signal)
+      .catch(async (primaryErr) => {
+        const shouldFallbackToGroq =
+          provider !== 'groq' &&
+          isTransientProviderError(primaryErr) &&
+          !isAbortLikeError(primaryErr) &&
+          !this.bargeIn.isDropped(requestId);
+
+        if (!shouldFallbackToGroq) {
+          throw primaryErr;
+        }
+
+        this.emit('metrics', {
+          type: 'provider_fallback_attempt',
+          requestId,
+          fromProvider: provider,
+          toProvider: 'groq',
+          reason: 'primary_provider_transient_error',
+          errorPreview: previewText(String(primaryErr?.message || primaryErr || '')),
+        });
+
+        try {
+          const summary = await this.#runProviderTurn(
+            prompt,
+            'groq',
+            requestId,
+            detectionEndedAtMs,
+            abortController.signal
+          );
+          this.emit('metrics', {
+            type: 'provider_fallback_success',
+            requestId,
+            fromProvider: provider,
+            toProvider: 'groq',
+          });
+          return summary;
+        } catch (fallbackErr) {
+          this.emit('metrics', {
+            type: 'provider_fallback_failed',
+            requestId,
+            fromProvider: provider,
+            toProvider: 'groq',
+            fallbackErrorPreview: previewText(String(fallbackErr?.message || fallbackErr || '')),
+          });
+          throw new Error(
+            `primary_provider_error:${primaryErr?.message || primaryErr}; fallback_provider_error:${fallbackErr?.message || fallbackErr}`
+          );
+        }
+      })
       .then((summary) => {
         this.bargeIn.markSettled(requestId);
 
