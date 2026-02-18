@@ -1,6 +1,11 @@
 const { LlmProvider, countTokensApprox } = require('./types');
 const { accumulateToolCallDelta, flushAccumulatedToolCalls } = require('./tool-call-accumulator');
 
+function supportsSarvamToolCalling(modelName) {
+  const model = String(modelName || '').trim().toLowerCase();
+  return model === 'sarvam-30b' || model === 'sarvam-105b';
+}
+
 class SarvamProvider extends LlmProvider {
   constructor(config) {
     super('sarvam');
@@ -72,7 +77,7 @@ class SarvamProvider extends LlmProvider {
     if (reasoningEffort) {
       requestPayload.reasoning_effort = reasoningEffort;
     }
-    if (tools && tools.length > 0) {
+    if (tools && tools.length > 0 && supportsSarvamToolCalling(model)) {
       requestPayload.tools = tools;
     }
 

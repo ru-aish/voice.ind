@@ -1019,7 +1019,7 @@ class VoicePipeline extends EventEmitter {
 
   #getProvider(providerName) {
     const validProviders = ['cerebras', 'groq', 'sarvam', 'gemini'];
-    const normalized = validProviders.includes(providerName) ? providerName : 'groq';
+    const normalized = validProviders.includes(providerName) ? providerName : 'gemini';
     if (this.providers.has(normalized)) {
       return this.providers.get(normalized);
     }

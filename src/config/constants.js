@@ -29,7 +29,7 @@ const DEFAULTS = {
   },
 
   llm: {
-    provider: 'groq',
+    provider: 'gemini',
   },
 
   pipeline: {

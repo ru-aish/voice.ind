@@ -131,8 +131,8 @@ function loadConfig() {
         DEFAULTS.llm.provider
       ),
       providerLocked: Boolean(
-        normalizeProvider(process.env.VOICE_PIPELINE_PROVIDER) ||
-          normalizeProvider(process.env.DEFAULT_PROVIDER) ||
+        parseBool(process.env.VOICE_PIPELINE_PROVIDER_LOCKED, false) ||
+          normalizeProvider(process.env.VOICE_PIPELINE_PROVIDER) ||
           normalizeProvider(process.env.LLM_PROVIDER)
       ),
     },
