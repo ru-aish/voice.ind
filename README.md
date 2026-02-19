@@ -1,151 +1,57 @@
 # voice.ai - Real-time Voice AI Server
 
-WebSocket server for real-time voice conversations with STT, LLM, and TTS.
+This project is a WebSocket server for real-time voice conversations using Speech-to-Text (STT), Large Language Models (LLM), and Text-to-Speech (TTS).
 
-## Endpoint
+## Project Structure
 
-```
-wss://your-domain.onrender.com/
-```
+The project is organized into several key directories:
 
-## Protocol
+* src: Contains the backend source code.
+* src/app: Application-specific logic, including the live voice client.
+* src/config: Configuration settings and provider setups.
+* src/core: Core modules for the voice pipeline, including STT, LLM, and TTS integrations.
+* src/server: WebSocket server implementation and handling.
+* src/tools: Utility tools used across the backend.
+* src/types: Type definitions for the project.
+* src/utils: General utility functions.
+* frontend: A Next.js based web interface for interacting with the voice server.
+* docs: Project documentation.
+* prompts: System prompts used by the LLM.
+* scripts: Helper scripts for development and deployment.
+* tests: Test suites for verifying project functionality.
 
-### Connect
-```javascript
-const ws = new WebSocket('wss://your-app.onrender.com/');
-```
+## Input and Output Formats
 
-### Send Audio (Input)
-```json
-{
-  "type": "audio",
-  "data": {
-    "audio": "<base64-encoded-wav>"
-  }
-}
-```
+The server communicates via WebSockets using JSON-formatted messages.
 
-Or send raw binary WebSocket frames (preferred for low latency).
+### Input Formats
 
-### Receive Audio (Output)
-```json
-{
-  "type": "audio",
-  "data": {
-    "audio": "<base64-encoded-wav-chunk>",
-    "segmentIndex": 1
-  }
-}
-```
+* Audio Data: A message with the type set to audio. The data should contain an audio field with a base64-encoded WAV string. Alternatively, raw binary WebSocket frames can be sent for lower latency.
+* Configuration: A message with the type set to config. The data should include a configuration object with fields for language (such as hi-IN) and provider (such as groq).
+* Text Input: A message with the type set to text. The data should contain a text field with the string to be processed by the LLM, bypassing the STT step.
 
-### Events Received
+### Output Formats
 
-| Type | Description |
-|------|-------------|
-| `ready` | Session initialized |
-| `transcript` | User speech transcribed |
-| `audio` | AI response audio chunk |
-| `vad` | Voice activity (START_SPEECH/END_SPEECH) |
-| `metrics` | Latency and timing info |
-| `error` | Error messages |
+* Audio Output: A message with the type set to audio. The data contains a base64-encoded audio chunk and a segment index.
+* Ready Event: A message with the type set to ready, indicating the session is initialized.
+* Transcript Event: A message with the type set to transcript, containing the transcribed text from the user's speech.
+* Voice Activity: A message with the type set to vad, indicating speech start or end (START_SPEECH or END_SPEECH).
+* Metrics: A message with the type set to metrics, providing latency and timing information.
+* Error: A message with the type set to error, containing error details if something goes wrong.
 
-### Configuration
-```json
-{
-  "type": "config",
-  "data": {
-    "config": {
-      "language": "hi-IN",
-      "provider": "groq"
-    }
-  }
-}
-```
+## How to Use
 
-### Direct Text Input (skip STT)
-```json
-{
-  "type": "text",
-  "data": {
-    "text": "Hello, how are you?"
-  }
-}
-```
+### Setup
 
-## Quick Start
+1. Clone the repository and navigate to the project root.
+2. Install backend dependencies using the command: npm install
+3. Set up environment variables by creating a .env file in the root. Refer to .env.example for the required keys such as SARVAM_API_KEY and GROQ_API_KEY.
+4. Navigate to the frontend directory and install frontend dependencies using: npm install
 
-```bash
-npm install
-npm run start
-```
+### Running the Project
 
-Server runs on `ws://localhost:8081/`
-
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `SARVAM_API_KEY` | Yes | For STT and TTS |
-| `GROQ_API_KEY` | Yes | For LLM inference |
-| `CEREBRAS_API_KEY` | No | Alternative LLM |
-| `GEMINI_API_KEY` | No | Gemini LLM provider (or use `GOOGLE_API_KEY`) |
-| `DEFAULT_PROVIDER` | No | `groq`, `cerebras`, `sarvam`, or `gemini` |
-| `SARVAM_STT_LANGUAGE_CODE` | No | Default: `hi-IN` |
-
-## Deploy
-
-### Docker
-```bash
-docker build -t voice-ai-server .
-docker run -p 8081:8081 --env-file .env voice-ai-server
-```
-
-### Render / Railway
-- Root directory: `.`
-- Build: Docker
-- Port: `8081`
-- Add environment variables
-
-## Client Example
-
-```javascript
-const WebSocket = require('ws');
-const fs = require('fs');
-
-const ws = new WebSocket('wss://your-app.onrender.com/');
-
-ws.on('message', (data) => {
-  const msg = JSON.parse(data);
-  
-  if (msg.type === 'ready') {
-    // Send audio
-    const audio = fs.readFileSync('input.wav');
-    ws.send(JSON.stringify({
-      type: 'audio',
-      data: { audio: audio.toString('base64') }
-    }));
-  }
-  
-  if (msg.type === 'audio') {
-    const audioBuffer = Buffer.from(msg.data.audio, 'base64');
-    fs.writeFileSync('output.wav', audioBuffer);
-    console.log('Received audio chunk');
-  }
-  
-  if (msg.type === 'transcript') {
-    console.log('User said:', msg.data.transcript);
-  }
-});
-```
-
-## Supported Languages
-
-- `hi-IN` - Hindi
-- `en-IN` - English (Indian)
-- `gu-IN` - Gujarati
-
-## Architecture
-
-```
-Client Audio → Sarvam STT → Groq/Cerebras LLM → Sarvam TTS → Client Audio
-```
+1. Start the backend server from the root directory using the command: npm start
+   The server will run on ws://localhost:8081 by default.
+2. In a separate terminal, navigate to the frontend directory and start the development server using the command: npm run dev
+3. Open your browser and navigate to the local frontend address (usually http://localhost:3000) to start the voice interaction.
+4. Alternatively, you can run a live voice client from the terminal using the command: npm run client:live
