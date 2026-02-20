@@ -138,6 +138,79 @@ ws.on('message', (data) => {
 });
 ```
 
+## Twilio-Condition Simulator Client
+
+Use this when you want to test quality under Twilio media constraints without connecting real Twilio calls.
+
+- Inbound simulation: 8kHz mono PCMU (`audio/x-mulaw`) frames in 20ms chunks
+- Outbound simulation: server audio is converted back to 8kHz PCMU Twilio-style `media` frames
+- Lifecycle simulation: `connected`, `start`, `media`, `stop`
+- Modes:
+  - `bridge` (default): works with current server protocol (`type: "audio"`) while forcing Twilio codec path
+  - `twilio`: sends raw Twilio JSON events directly (for protocol-change testing)
+
+```bash
+npm run client:twilio -- --input=./samples/me.wav --mode=bridge
+```
+
+Optional:
+
+```bash
+npm run client:twilio -- --input=./samples/me.wav --mode=bridge --provider=gemini --language=hi-IN --tts-language=hi-IN --save-assistant-wav=./out/twilio-decoded.wav
+```
+
+Raw Twilio frame mode:
+
+```bash
+npm run client:twilio -- --input=./samples/me.wav --mode=twilio
+```
+
+## Twilio Live Communication
+
+The server now accepts Twilio Media Stream events on the same WebSocket endpoint.
+
+- Inbound from Twilio:
+  - `connected`, `start`, `media`, `stop`, `mark`, `dtmf`
+  - `media.payload` must be base64 PCMU (`audio/x-mulaw`, `8000 Hz`, mono)
+- Outbound to Twilio:
+  - Server sends `{"event":"media","streamSid":"...","media":{"payload":"<base64-ulaw-8k>"}}`
+- Transcoding is handled internally:
+  - Twilio `mulaw 8k` -> server STT PCM16 (configured sample rate)
+  - Server TTS PCM/WAV -> Twilio `mulaw 8k`
+
+Use Twilio stream URL with a Twilio hint query param:
+
+```xml
+<Response>
+  <Connect>
+    <Stream url="wss://your-domain.example.com/?twilio=1" />
+  </Connect>
+</Response>
+```
+
+If your server path is not `/`, keep that path and append `?twilio=1`.
+
+### Local PC Twilio-Like Live Talk (No Twilio Account Needed)
+
+Use this to talk from your PC mic and hear replies, while using Twilio-style media protocol over WebSocket.
+
+```bash
+npm run client:twilio:live -- --url=ws://127.0.0.1:8081/?twilio=1 --provider=sarvam --language=gu-IN --tts-language=gu-IN
+```
+
+This client:
+- captures mic audio from your PC (`arecord`, PCM16 8k)
+- sends Twilio `connected/start/media/stop` events
+- receives Twilio `event: "media"` from server
+- plays audio back locally (`aplay`, PCM16 8k)
+- uses the same backend interruption path as `client:live` (Sarvam STT VAD + server barge-in)
+
+Optional devices:
+
+```bash
+npm run client:twilio:live -- --mic-device=pulse --speaker-device=pulse --chunk-ms=20
+```
+
 ## Supported Languages
 
 - `hi-IN` - Hindi

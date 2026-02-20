@@ -379,6 +379,21 @@ class VoicePipeline extends EventEmitter {
     };
 
     const validSttCodecs = new Set(['wav', 'pcm_s16le', 'pcm_l16', 'pcm_raw']);
+    const validTtsCodecs = new Set([
+      'wav',
+      'mp3',
+      'aac',
+      'opus',
+      'flac',
+      'pcm',
+      'linear16',
+      'mulaw',
+      'alaw',
+      // Backward-compatible aliases accepted by some integrations.
+      'pcm_s16le',
+      'pcm_l16',
+      'pcm_raw',
+    ]);
 
     if (next.provider && ['groq', 'cerebras', 'sarvam', 'gemini'].includes(String(next.provider).toLowerCase())) {
       if (!this.config.llm.providerLocked) {
@@ -460,6 +475,20 @@ class VoicePipeline extends EventEmitter {
           applied: resolvedTtsLanguage.languageCode,
           reason: resolvedTtsLanguage.reason,
         });
+      }
+    }
+
+    const ttsSampleRate = parseBoundedInt(next.ttsSampleRate, 8000, 48000);
+    if (ttsSampleRate !== null && this.config.tts.sampleRate !== ttsSampleRate) {
+      this.config.tts.sampleRate = ttsSampleRate;
+      resetTts = true;
+    }
+
+    if (next.ttsOutputCodec && String(next.ttsOutputCodec).trim()) {
+      const codec = String(next.ttsOutputCodec).trim().toLowerCase();
+      if (validTtsCodecs.has(codec) && this.config.tts.outputCodec !== codec) {
+        this.config.tts.outputCodec = codec;
+        resetTts = true;
       }
     }
 
@@ -688,6 +717,8 @@ class VoicePipeline extends EventEmitter {
       sttSampleRate: this.config.stt.sampleRate,
       sttInputAudioCodec: this.config.stt.inputAudioCodec,
       ttsLanguage: this.config.tts.languageCode,
+      ttsSampleRate: this.config.tts.sampleRate,
+      ttsOutputCodec: this.config.tts.outputCodec,
       sttModel: this.config.stt.model,
       ttsSpeaker: this.config.tts.speaker,
       groqModel: this.config.groq.model,
@@ -1273,8 +1304,58 @@ class VoicePipeline extends EventEmitter {
       }
     }
 
-    messages.push({ role: 'user', content: prompt });
-    return messages;
+    const normalizedPrompt = String(prompt || '').trim();
+    const latestHistoryMessage = this.conversationHistory[this.conversationHistory.length - 1];
+    const promptAlreadyInHistory =
+      this.config.pipeline.contextEnabled &&
+      latestHistoryMessage?.role === 'user' &&
+      String(latestHistoryMessage?.content || '').trim() === normalizedPrompt;
+
+    if (normalizedPrompt && !promptAlreadyInHistory) {
+      messages.push({ role: 'user', content: normalizedPrompt });
+    }
+
+    return this.#normalizeContextMessagesForProvider(messages, providerName);
+  }
+
+  #normalizeContextMessagesForProvider(messages, providerName) {
+    const safe = Array.isArray(messages) ? messages : [];
+    const systemParts = [];
+    const dialogue = [];
+
+    for (const msg of safe) {
+      const role = String(msg?.role || '').trim();
+      const content = String(msg?.content || '').trim();
+      if (!content) continue;
+
+      if (role === 'system') {
+        systemParts.push(content);
+        continue;
+      }
+      if (role === 'user' || role === 'assistant') {
+        const last = dialogue[dialogue.length - 1];
+        if (last?.role === role) {
+          last.content = mergeText(last.content, content);
+        } else {
+          dialogue.push({ role, content });
+        }
+      }
+    }
+
+    if (providerName === 'sarvam') {
+      // Sarvam requires alternation beginning with a user turn (after optional system).
+      while (dialogue.length > 0 && dialogue[0].role !== 'user') {
+        dialogue.shift();
+      }
+    }
+
+    const normalized = [];
+    if (systemParts.length > 0) {
+      normalized.push({ role: 'system', content: systemParts.join('\n\n') });
+    }
+    normalized.push(...dialogue);
+
+    return normalized;
   }
 
   #markInFlightDropped(reason) {
@@ -1948,6 +2029,12 @@ class VoicePipeline extends EventEmitter {
         segmentIndex += 1;
         const segStartMs = Date.now();
         this.#appendSpokenForTurn(requestId, content);
+
+        this.emit('assistant_text', {
+          requestId,
+          segmentIndex,
+          text: content,
+        });
 
         let ttsResult;
         try {

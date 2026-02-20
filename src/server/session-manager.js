@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto');
 const { VoicePipeline } = require('../core/pipeline/voice-pipeline');
 const { createMessageHandler } = require('./message-handler');
 const { WS_MESSAGE_TYPES } = require('../config/constants');
+const { TwilioBridge, isLikelyTwilioRequestUrl } = require('./twilio-bridge');
 
 class SessionManager {
   constructor(config, logger = null) {
@@ -11,7 +12,7 @@ class SessionManager {
     this.sessions = new Map();
   }
 
-  async createSession(ws) {
+  async createSession(ws, req = null) {
     const sessionId = randomUUID();
     const sessionStartedAtMs = Date.now();
     let inboundMessages = 0;
@@ -42,6 +43,18 @@ class SessionManager {
       startedAtMs: sessionStartedAtMs,
       ready: false,
     };
+    const twilioBridge = new TwilioBridge({
+      ws,
+      session,
+      logger: this.logger,
+      sendMetric: (metric) => {
+        if (twilioBridge.active) return;
+        send(WS_MESSAGE_TYPES.METRICS, metric);
+      },
+    });
+    if (isLikelyTwilioRequestUrl(req)) {
+      twilioBridge.enable('url_hint');
+    }
 
     this.sessions.set(sessionId, session);
     this.logger?.info(`session_created id=${sessionId}`);
@@ -49,10 +62,12 @@ class SessionManager {
     pipeline.on('ready', (payload) => {
       session.ready = true;
       this.logger?.info(`session_ready id=${sessionId} provider=${payload?.provider || 'unknown'} stt_connected=${payload?.sttConnected === true}`);
+      if (twilioBridge.active) return;
       send(WS_MESSAGE_TYPES.READY, payload);
     });
 
     pipeline.on('transcript', (payload) => {
+      if (twilioBridge.active) return;
       send(WS_MESSAGE_TYPES.TRANSCRIPT, {
         transcript: payload.text,
         isFinal: payload.isFinal,
@@ -62,6 +77,7 @@ class SessionManager {
     });
 
     pipeline.on('vad', (payload) => {
+      if (twilioBridge.active) return;
       send(WS_MESSAGE_TYPES.VAD, {
         vadSignal: payload.signal,
         segmentIndex: payload.segmentIndex,
@@ -72,6 +88,10 @@ class SessionManager {
     });
 
     pipeline.on('audio', (payload) => {
+      if (twilioBridge.active) {
+        twilioBridge.sendTwilioAudioFromPipeline(payload.audioBase64);
+        return;
+      }
       send(WS_MESSAGE_TYPES.AUDIO, {
         requestId: payload.requestId,
         provider: payload.provider,
@@ -82,8 +102,19 @@ class SessionManager {
       });
     });
 
+    pipeline.on('assistant_text', (payload) => {
+      if (twilioBridge.active) return;
+      send(WS_MESSAGE_TYPES.ASSISTANT_TEXT, {
+        requestId: payload.requestId,
+        segmentIndex: payload.segmentIndex,
+        text: payload.text,
+      });
+    });
+
     pipeline.on('metrics', (payload) => {
-      send(WS_MESSAGE_TYPES.METRICS, payload);
+      if (!twilioBridge.active) {
+        send(WS_MESSAGE_TYPES.METRICS, payload);
+      }
       const metricType = String(payload?.type || '');
       const shouldLogDetailed =
         metricType.startsWith('trace_') ||
@@ -100,6 +131,7 @@ class SessionManager {
 
     pipeline.on('error', (payload) => {
       this.logger?.warn(`session_pipeline_error id=${sessionId} error=${payload?.error || 'unknown_pipeline_error'}`);
+      if (twilioBridge.active) return;
       send(WS_MESSAGE_TYPES.ERROR, {
         error: payload?.error || 'unknown_pipeline_error',
       });
@@ -119,6 +151,11 @@ class SessionManager {
         try {
           const raw = message?.toString?.() || '';
           const parsed = JSON.parse(raw);
+          if (twilioBridge.isTwilioFrame(parsed)) {
+            lastInboundType = `twilio_${String(parsed?.event || 'unknown')}`;
+            twilioBridge.handleTwilioIncoming(parsed);
+            return;
+          }
           lastInboundType = String(parsed?.type || 'text_unknown');
         } catch {
           lastInboundType = 'text_invalid_json';

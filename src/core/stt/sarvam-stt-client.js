@@ -30,7 +30,6 @@ class SarvamSttClient extends EventEmitter {
       high_vad_sensitivity: String(this.config.highVadSensitivity),
       vad_signals: String(this.config.vadSignals),
       flush_signal: String(this.config.flushSignal),
-      reconnectAttempts: 0,
     });
 
     this.socket.on('message', (response) => {
