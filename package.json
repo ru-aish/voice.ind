@@ -9,13 +9,16 @@
     "start": "node src/index.js",
     "check": "node --check src/index.js",
     "client:live": "node src/app/voice-client-live.js",
-    "client:prod": "VOICE_SERVER_URL=wss://voice-ind.onrender.com/ node src/app/voice-client-live.js"
+    "client:prod": "VOICE_SERVER_URL=wss://voice-ind.onrender.com/ node src/app/voice-client-live.js",
+    "client:twilio": "node src/app/twilio-condition-client.js",
+    "client:twilio:live": "node src/app/twilio-live-client.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@cerebras/cerebras_cloud_sdk": "^1.64.1",
+    "@deepgram/sdk": "^4.11.3",
     "dotenv": "^17.3.1",
     "googleapis": "^171.4.0",
     "groq-sdk": "^0.37.0",

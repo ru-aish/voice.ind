@@ -5,7 +5,7 @@ const DEFAULTS = {
   logLevel: 'info',
 
   stt: {
-    model: 'saaras:v3',
+    model: 'saarika:v2.5',
     languageCode: 'gu-IN',
     sampleRate: 16000,
     inputAudioCodec: 'pcm_s16le',
@@ -29,7 +29,7 @@ const DEFAULTS = {
   },
 
   llm: {
-    provider: 'gemini',
+    provider: 'groq',
   },
 
   pipeline: {
@@ -134,6 +134,7 @@ const WS_MESSAGE_TYPES = {
   READY: 'ready',
   TOOL_CALL: 'tool_call',
   TOOL_RESULT: 'tool_result',
+  ASSISTANT_TEXT: 'assistant_text',
 };
 
 module.exports = {
