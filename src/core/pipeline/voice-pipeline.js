@@ -154,7 +154,7 @@ function defaultGreetingForLanguage(languageCode) {
   if (normalized === 'hi-in' || normalized === 'hi') {
     return 'नमस्कार. मैं एलिविक्स एआई का वॉइस सहायक हूं. आज मैं आपकी कैसे मदद कर सकता हूं?';
   }
-  return 'Hello. I am Elevix AI voice assistant. How can I help you today?';
+  return 'Hello. Thank you for calling Clarvoc Legal Partners. How can I help you today?';
 }
 
 function isGenericFrontendGreeting(text) {
