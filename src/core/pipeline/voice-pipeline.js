@@ -24,6 +24,7 @@ const { SarvamTtsClient } = require('../tts/sarvam-tts-client');
 const { extractLineChunks, splitTimeoutSafeChunk } = require('../tts/audio-chunker');
 
 const { BargeInHandler, mergePrompts } = require('./barge-in-handler');
+const { resolvePersonalizationPrompt } = require('../../personalization/resolve-prompt');
 const { LatencyTracker } = require('./latency-tracker');
 const { VAD_SIGNALS } = require('../../config/constants');
 
@@ -236,6 +237,9 @@ class VoicePipeline extends EventEmitter {
     super();
     this.sessionId = sessionId;
     this.config = config;
+    this.sessionTrackingId = null;
+    this.sessionCampaignId = null;
+    this.personalizationMeta = null;
     this.pendingTtsLanguageFallbackMetric = null;
 
     this.activeProvider = config.llm.provider;
@@ -681,9 +685,55 @@ class VoicePipeline extends EventEmitter {
       });
     }
 
+    let personalizationApplied = false;
+    let personalizationType = null;
+    const trackingId =
+      next.trackingId || next.tracking_id || next.tid || this.sessionTrackingId || null;
+    const campaignId =
+      next.campaignId || next.campaign_id || next.cid || this.sessionCampaignId || null;
+
+    if (trackingId) this.sessionTrackingId = String(trackingId).trim();
+    if (campaignId) this.sessionCampaignId = String(campaignId).trim();
+
+    if (this.sessionTrackingId || this.sessionCampaignId) {
+      try {
+        const resolved = await resolvePersonalizationPrompt({
+          trackingId: this.sessionTrackingId,
+          campaignId: this.sessionCampaignId,
+        });
+        this.personalizationMeta = resolved;
+        personalizationType = resolved.type;
+        if (resolved.applied && resolved.systemPrompt) {
+          const promptText = String(resolved.systemPrompt).trim();
+          this.config.groq.systemPrompt = promptText;
+          this.config.cerebras.systemPrompt = promptText;
+          this.config.sarvam.systemPrompt = promptText;
+          this.config.gemini.systemPrompt = promptText;
+          personalizationApplied = true;
+        }
+        this.emit('metrics', {
+          type: 'personalization_resolve',
+          applied: resolved.applied,
+          personalizationType: resolved.type,
+          reason: resolved.reason,
+          trackingId: this.sessionTrackingId || null,
+          campaignId: this.sessionCampaignId || null,
+        });
+      } catch (err) {
+        this.emit('metrics', {
+          type: 'personalization_resolve_error',
+          error: err?.message || String(err),
+        });
+      }
+    }
+
     return {
       provider: this.activeProvider,
       providerLocked: this.config.llm.providerLocked === true,
+      personalizationApplied,
+      personalizationType,
+      trackingId: this.sessionTrackingId || null,
+      campaignId: this.sessionCampaignId || null,
       sttLanguage: this.config.stt.languageCode,
       sttSampleRate: this.config.stt.sampleRate,
       sttInputAudioCodec: this.config.stt.inputAudioCodec,
