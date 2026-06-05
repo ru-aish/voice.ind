@@ -2,7 +2,8 @@ const { spawn } = require('child_process');
 const WebSocket = require('ws');
 const readline = require('readline');
 const { Readable } = require('stream');
-const { globalCodexClient } = require('../src/core/llm/codex-provider');
+const { getGlobalCodexClient } = require('../src/core/llm/codex-provider');
+const globalCodexClient = getGlobalCodexClient();
 
 // ========================================================================
 // EDIT SYSTEM PROMPT HERE

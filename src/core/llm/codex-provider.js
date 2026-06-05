@@ -1,10 +1,34 @@
 const { spawn } = require('child_process');
+const fs = require('fs');
 const readline = require('readline');
 const EventEmitter = require('events');
 const { LlmProvider, countTokensApprox } = require('./types');
 
+function resolveCodexBinaryPath() {
+  const fromEnv = String(process.env.CODEX_BINARY_PATH || '').trim();
+  if (fromEnv) return fromEnv;
+  return 'codex';
+}
+
+function resolveCodexCwd() {
+  const fromEnv = String(process.env.CODEX_CWD || '').trim();
+  return fromEnv || process.cwd();
+}
+
+function binaryExists(binaryPath) {
+  if (!binaryPath || binaryPath.includes('/')) {
+    try {
+      fs.accessSync(binaryPath, fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 class CodexClient extends EventEmitter {
-  constructor(binaryPath = '/home/coder/.local/bin/codex', cwd = '/home/coder/Code/playground') {
+  constructor(binaryPath = resolveCodexBinaryPath(), cwd = resolveCodexCwd()) {
     super();
     this.binaryPath = binaryPath;
     this.cwd = cwd;
@@ -13,67 +37,91 @@ class CodexClient extends EventEmitter {
     this.pendingRequests = new Map();
     this.rl = null;
     this.initPromise = null;
+    this.startError = null;
   }
 
   async start() {
+    if (this.startError) {
+      throw this.startError;
+    }
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
-      this.proc = spawn(this.binaryPath, ['app-server'], {
-        cwd: this.cwd
-      });
+      if (!binaryExists(this.binaryPath)) {
+        const err = new Error(
+          `Codex CLI not found at "${this.binaryPath}". Install codex or set CODEX_BINARY_PATH.`
+        );
+        this.startError = err;
+        throw err;
+      }
 
-      this.rl = readline.createInterface({
-        input: this.proc.stdout,
-        terminal: false
-      });
+      await new Promise((resolve, reject) => {
+        this.proc = spawn(this.binaryPath, ['app-server'], {
+          cwd: this.cwd,
+        });
 
-      this.rl.on('line', (line) => {
-        const trimmed = line.trim();
-        if (!trimmed) return;
-        try {
-          const msg = JSON.parse(trimmed);
-          if (msg.id !== undefined) {
-            const req = this.pendingRequests.get(msg.id);
-            if (req) {
-              this.pendingRequests.delete(msg.id);
-              if (msg.error) {
-                req.reject(new Error(msg.error.message || JSON.stringify(msg.error)));
-              } else {
-                req.resolve(msg.result);
+        this.proc.once('error', (spawnErr) => {
+          this.proc = null;
+          const err = new Error(
+            `Failed to start Codex (${this.binaryPath}): ${spawnErr.message}`
+          );
+          this.startError = err;
+          reject(err);
+        });
+
+        this.rl = readline.createInterface({
+          input: this.proc.stdout,
+          terminal: false,
+        });
+
+        this.rl.on('line', (line) => {
+          const trimmed = line.trim();
+          if (!trimmed) return;
+          try {
+            const msg = JSON.parse(trimmed);
+            if (msg.id !== undefined) {
+              const req = this.pendingRequests.get(msg.id);
+              if (req) {
+                this.pendingRequests.delete(msg.id);
+                if (msg.error) {
+                  req.reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+                } else {
+                  req.resolve(msg.result);
+                }
               }
+            } else {
+              this.emit('notification', msg);
             }
-          } else {
-            this.emit('notification', msg);
+          } catch {
+            // ignore parsing issues from CLI debug outputs
           }
-        } catch (err) {
-          // ignore parsing issues from CLI debug outputs
-        }
+        });
+
+        this.proc.stderr.on('data', (data) => {
+          console.error(`[Codex Daemon Stderr]: ${data.toString().trim()}`);
+        });
+
+        this.proc.on('exit', (code, signal) => {
+          console.log(`[Codex Daemon Exit]: code=${code} signal=${signal}`);
+          this.emit('exit', { code, signal });
+          this.proc = null;
+          this.rl = null;
+          this.initPromise = null;
+        });
+
+        resolve();
       });
 
-      this.proc.on('error', (err) => {
-        this.emit('error', err);
-      });
-
-      this.proc.stderr.on('data', (data) => {
-        console.error(`[Codex Daemon Stderr]: ${data.toString().trim()}`);
-      });
-
-      this.proc.on('exit', (code, signal) => {
-        console.log(`[Codex Daemon Exit]: code=${code} signal=${signal}`);
-        this.emit('exit', { code, signal });
-        this.proc = null;
-        this.rl = null;
-        this.initPromise = null;
-      });
-
-      // Perform handshake
       await this.request('initialize', {
         clientInfo: { name: 'voice-ai-codex-provider', version: '1.0.0' },
-        capabilities: { experimentalApi: true }
+        capabilities: { experimentalApi: true },
       });
       this.notify('initialized');
-    })();
+    })().catch((err) => {
+      this.initPromise = null;
+      if (!this.startError) this.startError = err;
+      throw err;
+    });
 
     return this.initPromise;
   }
@@ -89,9 +137,9 @@ class CodexClient extends EventEmitter {
         jsonrpc: '2.0',
         id: rid,
         method,
-        params
+        params,
       };
-      this.proc.stdin.write(JSON.stringify(req) + '\n');
+      this.proc.stdin.write(`${JSON.stringify(req)}\n`);
     });
   }
 
@@ -100,9 +148,9 @@ class CodexClient extends EventEmitter {
     const notif = {
       jsonrpc: '2.0',
       method,
-      params
+      params,
     };
-    this.proc.stdin.write(JSON.stringify(notif) + '\n');
+    this.proc.stdin.write(`${JSON.stringify(notif)}\n`);
   }
 
   close() {
@@ -115,28 +163,33 @@ class CodexClient extends EventEmitter {
   }
 }
 
-// Instantiate global preloaded Codex client
-const globalCodexClient = new CodexClient();
+let globalCodexClient = null;
 
-// Proactively launch Codex app-server on module load to preload it
-globalCodexClient.start().catch((err) => {
-  console.error('[Codex Preload Error]:', err);
-});
+function getGlobalCodexClient() {
+  if (!globalCodexClient) {
+    globalCodexClient = new CodexClient();
+  }
+  return globalCodexClient;
+}
 
 class CodexProvider extends LlmProvider {
   constructor(config) {
     super('codex');
     this.config = config;
     this.threadId = null;
+    this.cwd = resolveCodexCwd();
   }
 
   async ensureThread() {
+    const client = getGlobalCodexClient();
+    await client.start();
+
     if (!this.threadId) {
-      const threadResp = await globalCodexClient.request('thread/start', {
-        cwd: '/home/coder/Code/playground',
+      const threadResp = await client.request('thread/start', {
+        cwd: this.cwd,
         approvalPolicy: 'never',
         sandbox: 'danger-full-access',
-        model: this.config.model || 'gpt-5.5'
+        model: this.config.model || 'gpt-5.5',
       });
       this.threadId = threadResp.thread.id;
     }
@@ -147,6 +200,9 @@ class CodexProvider extends LlmProvider {
     if (!prompt || !String(prompt).trim()) {
       throw new Error('Prompt is empty');
     }
+
+    const client = getGlobalCodexClient();
+    await client.start();
 
     const metrics = {
       provider: this.name,
@@ -170,37 +226,33 @@ class CodexProvider extends LlmProvider {
 
     throwIfAborted();
 
-    // 1. Ensure thread exists
     const threadId = await this.ensureThread();
 
-    // 2. Format final prompt with system prompt if configured
     let finalPrompt = prompt;
     if (this.config.systemPrompt) {
       finalPrompt = `${this.config.systemPrompt}\n\nUser: ${prompt}`;
     }
 
     const turnParams = {
-      threadId: threadId,
+      threadId,
       input: [{ type: 'text', text: finalPrompt }],
       approvalPolicy: 'never',
       sandboxPolicy: { type: 'dangerFullAccess' },
       model: this.config.model || 'gpt-5.5',
-      effort: this.config.reasoningEffort || 'low'
+      effort: this.config.reasoningEffort || 'low',
     };
 
-    const turnResp = await globalCodexClient.request('turn/start', turnParams);
+    const turnResp = await client.request('turn/start', turnParams);
     const turnId = turnResp.turn.id;
 
     throwIfAborted();
 
-    // 3. Listen to streaming notifications from daemon
     return new Promise((resolve, reject) => {
       const handleNotification = async (msg) => {
         try {
           const method = msg.method;
           const params = msg.params || {};
 
-          // Filter messages belonging to this turn
           if (params.turnId !== turnId && params.threadId !== threadId) {
             const t = params.turn || {};
             if (t.id !== turnId) return;
@@ -251,7 +303,7 @@ class CodexProvider extends LlmProvider {
       };
 
       const cleanup = () => {
-        globalCodexClient.off('notification', handleNotification);
+        client.off('notification', handleNotification);
         abortSignal?.removeEventListener('abort', handleAbort);
       };
 
@@ -260,7 +312,7 @@ class CodexProvider extends LlmProvider {
         reject(new Error('Turn aborted'));
       };
 
-      globalCodexClient.on('notification', handleNotification);
+      client.on('notification', handleNotification);
       abortSignal?.addEventListener('abort', handleAbort);
     });
   }
@@ -268,5 +320,5 @@ class CodexProvider extends LlmProvider {
 
 module.exports = {
   CodexProvider,
-  globalCodexClient
+  getGlobalCodexClient,
 };

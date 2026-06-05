@@ -16,7 +16,8 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), 
 
 const { spawn } = require('child_process');
 const WebSocket = require('ws');
-const { globalCodexClient } = require('../src/core/llm/codex-provider');
+const { getGlobalCodexClient } = require('../src/core/llm/codex-provider');
+const globalCodexClient = getGlobalCodexClient();
 const { DeepgramTtsClient } = require('../src/core/tts/deepgram-tts-client');
 
 const ARGS = process.argv.slice(2);
