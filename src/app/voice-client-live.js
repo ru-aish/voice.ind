@@ -2,6 +2,7 @@ require('dotenv').config({ quiet: true });
 
 const WebSocket = require('ws');
 const { spawn } = require('child_process');
+const { resolveAudioDevice } = require('../utils/alsa-devices');
 
 const ARGS = process.argv.slice(2);
 
@@ -38,8 +39,8 @@ const SERVER_PATH = process.env.VOICE_SERVER_WS_PATH || '/';
 const WS_URL =
   process.env.VOICE_SERVER_URL ||
   `ws://127.0.0.1:${Number.isFinite(SERVER_PORT) ? SERVER_PORT : 8081}${SERVER_PATH}`;
-const MIC_DEVICE = process.env.MIC_DEVICE || 'pulse';
-const SPEAKER_DEVICE = process.env.SPEAKER_DEVICE || 'pulse';
+const MIC_DEVICE = resolveAudioDevice(process.env.MIC_DEVICE, 'capture');
+const SPEAKER_DEVICE = resolveAudioDevice(process.env.SPEAKER_DEVICE, 'playback');
 const SAMPLE_RATE = Number(process.env.SARVAM_STT_SAMPLE_RATE || 16000);
 const TTS_SAMPLE_RATE = Number(process.env.TTS_SAMPLE_RATE || process.env.VOICE_TTS_SAMPLE_RATE || 24000);
 const PROVIDER = (getArgValue('--provider') || process.env.DEFAULT_PROVIDER || 'groq').toLowerCase();
@@ -59,9 +60,10 @@ if (hasFlag('--help') || hasFlag('-h')) {
   npm run voice:client -- --provider=cerebras --language=hi-IN --verbose
   npm run voice:client -- --provider=gemini --language=en-IN
   npm run voice:client -- --provider=sarvam --language=gu-IN
+  npm run voice:client -- --provider=codex --language=en-IN
 
 Options:
-  --provider=groq|cerebras|gemini|sarvam
+  --provider=groq|cerebras|gemini|sarvam|codex
   --language=hi-IN|gu-IN|en-IN
   --tts-language=hi-IN|en-IN|gu-IN
   --no-speaker

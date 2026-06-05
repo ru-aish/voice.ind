@@ -3,6 +3,7 @@ const { EventEmitter } = require('events');
 const { toolDefinitions, ToolExecutor } = require('../../tools');
 
 const { SarvamSttClient } = require('../stt/sarvam-stt-client');
+const { DeepgramSttClient } = require('../stt/deepgram-stt-client');
 const {
   extractTranscript,
   extractTranscriptIsFinal,
@@ -18,9 +19,11 @@ const { GroqProvider } = require('../llm/groq-provider');
 const { CerebrasProvider } = require('../llm/cerebras-provider');
 const { SarvamProvider } = require('../llm/sarvam-provider');
 const { GeminiProvider } = require('../llm/gemini-provider');
+const { CodexProvider } = require('../llm/codex-provider');
 const { countTokensApprox } = require('../llm/types');
 
 const { SarvamTtsClient } = require('../tts/sarvam-tts-client');
+const { DeepgramTtsClient } = require('../tts/deepgram-tts-client');
 const { extractLineChunks, splitTimeoutSafeChunk } = require('../tts/audio-chunker');
 
 const { BargeInHandler, mergePrompts } = require('./barge-in-handler');
@@ -95,6 +98,37 @@ function canonicalLanguageCode(languageCode) {
   if (normalized === 'en' || normalized === 'en-in') return 'en-IN';
   if (!normalized) return '';
   return String(languageCode || '').trim();
+}
+
+function isEnglishLanguage(languageCode) {
+  const normalized = String(languageCode || '').trim().toLowerCase();
+  return normalized === 'en' || normalized === 'en-in' || normalized.startsWith('en-');
+}
+
+function applyEnglishDeepgramSpeechProviders(config) {
+  const lang = canonicalLanguageCode(config.stt?.languageCode || config.tts?.languageCode);
+  if (!isEnglishLanguage(lang) || !config.keys?.deepgramApiKey) {
+    return { changed: false, restartStt: false, resetTts: false };
+  }
+  let restartStt = false;
+  let resetTts = false;
+  if (String(config.stt.provider || '').toLowerCase() !== 'deepgram') {
+    config.stt.provider = 'deepgram';
+    restartStt = true;
+  }
+  if (String(config.tts.provider || '').toLowerCase() !== 'deepgram') {
+    config.tts.provider = 'deepgram';
+    resetTts = true;
+  }
+  return { changed: restartStt || resetTts, restartStt, resetTts };
+}
+
+function resolveLlmProviderForLanguage(requestedProvider, languageCode) {
+  const provider = String(requestedProvider || '').trim().toLowerCase();
+  if (isEnglishLanguage(languageCode) && provider === 'sarvam') {
+    return 'groq';
+  }
+  return provider;
 }
 
 function resolveTtsLanguageCode(requestedLanguageCode, currentTtsLanguageCode = '') {
@@ -260,6 +294,18 @@ class VoicePipeline extends EventEmitter {
       };
     }
 
+    applyEnglishDeepgramSpeechProviders(this.config);
+    if (isEnglishLanguage(this.config.stt.languageCode)) {
+      const resolvedLlm = resolveLlmProviderForLanguage(
+        this.activeProvider,
+        this.config.stt.languageCode
+      );
+      if (resolvedLlm !== this.activeProvider) {
+        this.activeProvider = resolvedLlm;
+        this.config.llm.provider = resolvedLlm;
+      }
+    }
+
     this.vad = new VadHandler();
     this.bargeIn = new BargeInHandler();
 
@@ -297,6 +343,9 @@ class VoicePipeline extends EventEmitter {
     this.sessionStartedAtMs = Date.now();
     try {
       await this.#connectSttClient();
+      if (String(this.config.tts.provider || '').toLowerCase() === 'deepgram') {
+        await this.#ensureTtsClient();
+      }
     } catch (err) {
       this.emit('metrics', {
         type: 'stt_connect_init_failed',
@@ -321,7 +370,9 @@ class VoicePipeline extends EventEmitter {
       runtimeTag: 'voice-ai-2026-02-14-r6',
       provider: this.activeProvider,
       sttLanguage: this.config.stt.languageCode,
+      sttProvider: this.config.stt.provider,
       sttConnected: Boolean(this.sttClient?.connected),
+      ttsProvider: this.config.tts.provider,
       ttsLanguage: this.config.tts.languageCode,
       sampleRate: this.config.stt.sampleRate,
     });
@@ -387,7 +438,16 @@ class VoicePipeline extends EventEmitter {
 
     if (next.provider && ['groq', 'cerebras', 'sarvam', 'gemini'].includes(String(next.provider).toLowerCase())) {
       if (!this.config.llm.providerLocked) {
-        this.activeProvider = String(next.provider).toLowerCase();
+        const langForProvider = canonicalLanguageCode(
+          next.language || next.sttLanguage || this.config.stt.languageCode
+        );
+        this.activeProvider = resolveLlmProviderForLanguage(
+          String(next.provider).toLowerCase(),
+          langForProvider
+        );
+        if (this.activeProvider === 'groq') {
+          this.config.llm.provider = 'groq';
+        }
       }
     }
 
@@ -414,6 +474,18 @@ class VoicePipeline extends EventEmitter {
           applied: resolvedTtsLanguage.languageCode,
           reason: resolvedTtsLanguage.reason,
         });
+      }
+
+      const englishSpeech = applyEnglishDeepgramSpeechProviders(this.config);
+      if (englishSpeech.restartStt) restartStt = true;
+      if (englishSpeech.resetTts) resetTts = true;
+      if (!this.config.llm.providerLocked && isEnglishLanguage(requestedLang)) {
+        const resolved = resolveLlmProviderForLanguage(this.activeProvider, requestedLang);
+        if (resolved !== this.activeProvider) {
+          this.activeProvider = resolved;
+          this.config.llm.provider = resolved;
+          llmConfigChanged = true;
+        }
       }
     }
 
@@ -733,12 +805,19 @@ class VoicePipeline extends EventEmitter {
       personalizationType,
       trackingId: this.sessionTrackingId || null,
       campaignId: this.sessionCampaignId || null,
+      sttProvider: this.config.stt.provider,
       sttLanguage: this.config.stt.languageCode,
       sttSampleRate: this.config.stt.sampleRate,
       sttInputAudioCodec: this.config.stt.inputAudioCodec,
+      ttsProvider: this.config.tts.provider,
       ttsLanguage: this.config.tts.languageCode,
-      sttModel: this.config.stt.model,
+      sttModel:
+        this.config.stt.provider === 'deepgram'
+          ? this.config.stt.deepgramModel
+          : this.config.stt.model,
+      deepgramSttModel: this.config.stt.deepgramModel,
       ttsSpeaker: this.config.tts.speaker,
+      deepgramTtsModel: this.config.tts.deepgramModel,
       groqModel: this.config.groq.model,
       groqModelLocked: this.config.groq.modelLocked === true,
       cerebrasModel: this.config.cerebras.model,
@@ -888,36 +967,47 @@ class VoicePipeline extends EventEmitter {
   }
 
   async #connectSttClient(forceReconnect = false) {
-    if (forceReconnect && this.sttClient) {
+    const sttProvider = String(this.config.stt.provider || 'sarvam').trim().toLowerCase();
+    const needsNewClient =
+      forceReconnect ||
+      !this.sttClient ||
+      this.sttClientProvider !== sttProvider;
+
+    if (needsNewClient && this.sttClient) {
       const staleClient = this.sttClient;
       this.sttClient = null;
       await staleClient.close();
     }
 
-    if (this.sttClient?.connected) return;
+    if (this.sttClient?.connected && !needsNewClient) return;
     if (this.sttConnectPromise) {
       await this.sttConnectPromise;
       return;
     }
 
     const connectPromise = (async () => {
-      if (!this.config.keys.sarvamApiKey) {
-        throw new Error(
-          'Sarvam STT unavailable: set SARVAM_API_KEY or SARVAM_API_SUBSCRIPTION_KEY'
-        );
-      }
-      const sttClient = new SarvamSttClient({
-        apiKey: this.config.keys.sarvamApiKey,
-        model: this.config.stt.model,
-        languageCode: this.config.stt.languageCode,
-        sampleRate: this.config.stt.sampleRate,
-        inputAudioCodec: this.config.stt.inputAudioCodec,
-        encoding: this.config.stt.encoding,
-        highVadSensitivity: this.config.stt.highVadSensitivity,
-        vadSignals: this.config.stt.vadSignals,
-        flushSignal: this.config.stt.flushSignal,
-      });
+      const sttClient =
+        sttProvider === 'deepgram'
+          ? new DeepgramSttClient({
+              apiKey: this.config.keys.deepgramApiKey,
+              model: this.config.stt.deepgramModel,
+              sampleRate: this.config.stt.sampleRate,
+              endpointingMs: this.config.stt.deepgramEndpointingMs,
+              language: this.config.stt.deepgramLanguage,
+            })
+          : new SarvamSttClient({
+              apiKey: this.config.keys.sarvamApiKey,
+              model: this.config.stt.model,
+              languageCode: this.config.stt.languageCode,
+              sampleRate: this.config.stt.sampleRate,
+              inputAudioCodec: this.config.stt.inputAudioCodec,
+              encoding: this.config.stt.encoding,
+              highVadSensitivity: this.config.stt.highVadSensitivity,
+              vadSignals: this.config.stt.vadSignals,
+              flushSignal: this.config.stt.flushSignal,
+            });
       this.sttClient = sttClient;
+      this.sttClientProvider = sttProvider;
 
       sttClient.on('first_chunk_sent', ({ atMs }) => {
         if (this.sttClient !== sttClient) return;
@@ -996,25 +1086,42 @@ class VoicePipeline extends EventEmitter {
   }
 
   async #ensureTtsClient() {
-    if (!this.config.keys.sarvamApiKey) {
-      throw new Error(
-        'Sarvam TTS unavailable: set SARVAM_API_KEY or SARVAM_API_SUBSCRIPTION_KEY'
-      );
-    }
-    if (!this.ttsClient || this.ttsClient.aborted) {
-      this.ttsClient = new SarvamTtsClient({
-        apiKey: this.config.keys.sarvamApiKey,
-        wsUrl: this.config.tts.wsUrl,
-        speaker: this.config.tts.speaker,
-        languageCode: this.config.tts.languageCode,
-        pace: this.config.tts.pace,
-        minBufferSize: this.config.tts.minBufferSize,
-        maxChunkLength: this.config.tts.maxChunkLength,
-        outputCodec: this.config.tts.outputCodec,
-        flushDelayMs: this.config.tts.flushDelayMs,
-        sampleRate: this.config.tts.sampleRate,
-      });
+    const ttsProvider = String(this.config.tts.provider || 'sarvam').trim().toLowerCase();
+    const needsNewClient =
+      !this.ttsClient ||
+      this.ttsClient.aborted ||
+      this.ttsClientProvider !== ttsProvider;
 
+    if (needsNewClient) {
+      if (this.ttsClient) {
+        try {
+          await this.ttsClient.close();
+        } catch {}
+      }
+
+      if (ttsProvider === 'deepgram') {
+        this.ttsClient = new DeepgramTtsClient({
+          apiKey: this.config.keys.deepgramApiKey,
+          model: this.config.tts.deepgramModel,
+          encoding: this.config.tts.deepgramEncoding,
+          sampleRate: this.config.tts.deepgramSampleRate,
+        });
+      } else {
+        this.ttsClient = new SarvamTtsClient({
+          apiKey: this.config.keys.sarvamApiKey,
+          wsUrl: this.config.tts.wsUrl,
+          speaker: this.config.tts.speaker,
+          languageCode: this.config.tts.languageCode,
+          pace: this.config.tts.pace,
+          minBufferSize: this.config.tts.minBufferSize,
+          maxChunkLength: this.config.tts.maxChunkLength,
+          outputCodec: this.config.tts.outputCodec,
+          flushDelayMs: this.config.tts.flushDelayMs,
+          sampleRate: this.config.tts.sampleRate,
+        });
+      }
+
+      this.ttsClientProvider = ttsProvider;
       this.ttsClient.on('error', (err) => {
         this.emit('error', { error: `tts_socket_error: ${err?.message || err}` });
       });
@@ -1040,6 +1147,15 @@ class VoicePipeline extends EventEmitter {
   }
 
   #providerRuntimeConfig(providerName) {
+    if (providerName === 'codex') {
+      return {
+        model: this.config.codex.model,
+        temperature: null,
+        maxCompletionTokens: null,
+        topP: null,
+        reasoningEffort: this.config.codex.reasoningEffort,
+      };
+    }
     if (providerName === 'cerebras') {
       return {
         model: this.config.cerebras.model,
@@ -1077,14 +1193,20 @@ class VoicePipeline extends EventEmitter {
   }
 
   #getProvider(providerName) {
-    const validProviders = ['cerebras', 'groq', 'sarvam', 'gemini'];
+    const validProviders = ['cerebras', 'groq', 'sarvam', 'gemini', 'codex'];
     const normalized = validProviders.includes(providerName) ? providerName : 'gemini';
     if (this.providers.has(normalized)) {
       return this.providers.get(normalized);
     }
 
     let provider;
-    if (normalized === 'cerebras') {
+    if (normalized === 'codex') {
+      provider = new CodexProvider({
+        model: this.config.codex.model,
+        reasoningEffort: this.config.codex.reasoningEffort,
+        systemPrompt: this.config.codex.systemPrompt,
+      });
+    } else if (normalized === 'cerebras') {
       provider = new CerebrasProvider({
         apiKey: this.config.keys.cerebrasApiKey,
         model: this.config.cerebras.model,
@@ -1483,6 +1605,9 @@ class VoicePipeline extends EventEmitter {
       this.liveDispatchedSegments.has(segmentIndex)
     ) {
       this.liveDispatchedSegments.delete(segmentIndex);
+      if (this.bargeIn.hasQueuedPrompt()) {
+        this.bargeIn.consumeQueuedPrompt();
+      }
       this.emit('metrics', {
         type: 'skip_provider',
         reason: 'already_dispatched_live_transcript',
@@ -1516,24 +1641,16 @@ class VoicePipeline extends EventEmitter {
 
     this.liveTranscriptState.lastText = text;
     this.liveTranscriptState.lastSentAtMs = nowMs;
-    this.liveDispatchedSegments.add(segmentIndex);
 
-    if (this.bargeIn.inFlight) {
-      this.bargeIn.queueLatestPrompt(text);
-      const dropped = this.#markInFlightDropped('new_live_transcript_while_provider_inflight');
-      if (dropped) {
-        this.emit('metrics', {
-          type: 'barge_in',
-          requestId: dropped.requestId,
-          provider: dropped.provider,
-          reason: dropped.reason,
-          queuedPromptChars: this.bargeIn.queuedPrompt.length,
-          segmentIndex,
-        });
+    // One live dispatch per speech segment; later interims only refresh the queued prompt
+    if (this.liveDispatchedSegments.has(segmentIndex)) {
+      if (this.bargeIn.inFlight) {
+        this.bargeIn.queueLatestPrompt(text);
       }
       return;
     }
 
+    this.liveDispatchedSegments.add(segmentIndex);
     this.#dispatchTurn(text, nowMs, 'live_transcript');
   }
 

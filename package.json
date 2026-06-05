@@ -9,7 +9,11 @@
     "start": "node src/index.js",
     "check": "node --check src/index.js",
     "client:live": "node src/app/voice-client-live.js",
-    "client:prod": "VOICE_SERVER_URL=wss://voice-ind.onrender.com/ node src/app/voice-client-live.js"
+    "client:prod": "VOICE_SERVER_URL=wss://voice-ind.onrender.com/ node src/app/voice-client-live.js",
+    "test:e2e": "node tests/e2e-latency-live.js",
+    "test:e2e:simulate": "node tests/e2e-latency-live.js --simulate --turns=2",
+    "test:e2e:pipeline": "node tests/e2e-pipeline-latency.js",
+    "talk:codex": "node tests/talk-to-codex.js"
   },
   "engines": {
     "node": ">=20"

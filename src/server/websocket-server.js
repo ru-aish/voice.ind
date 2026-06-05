@@ -13,9 +13,9 @@ class VoiceWebSocketServer {
   }
 
   async start() {
-    if (!this.config.keys.sarvamApiKey) {
+    if (!this.config.keys.sarvamApiKey && !this.config.keys.deepgramApiKey) {
       this.logger.warn(
-        'SARVAM_API_KEY not set — server will start; STT/TTS need the key when a voice session runs'
+        'SARVAM_API_KEY and DEEPGRAM_API_KEY not set — server will start; voice sessions need API keys'
       );
     }
 

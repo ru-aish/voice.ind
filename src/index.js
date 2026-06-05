@@ -1,10 +1,11 @@
 require('dotenv').config({ quiet: true });
 
-const { loadConfig } = require('./config');
+const { loadConfig, validateStartupConfig } = require('./config');
 const { VoiceWebSocketServer } = require('./server/websocket-server');
 
 async function main() {
   const config = loadConfig();
+  validateStartupConfig(config);
 
   const server = new VoiceWebSocketServer(config);
   const started = await server.start();
@@ -17,7 +18,7 @@ async function main() {
 
   console.log('[voice.ai] websocket server started');
   console.log(
-    `[voice.ai] ws://0.0.0.0:${started.port}${started.path} provider_default=${config.llm.provider} stt_language=${config.stt.languageCode} log_level=${config.server.logLevel}`
+    `[voice.ai] ws://0.0.0.0:${started.port}${started.path} llm=${config.llm.provider} stt=${config.stt.provider} tts=${config.tts.provider} log_level=${config.server.logLevel}`
   );
   console.log(
     `[voice.ai] groq_model=${config.groq.model} groq_max_tokens=${config.groq.maxCompletionTokens} cerebras_model=${config.cerebras.model} cerebras_max_tokens=${config.cerebras.maxCompletionTokens}`

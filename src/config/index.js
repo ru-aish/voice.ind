@@ -1,7 +1,7 @@
 const { DEFAULTS } = require('./constants');
 const fs = require('fs');
 const path = require('path');
-const SUPPORTED_LLM_PROVIDERS = new Set(['groq', 'cerebras', 'sarvam', 'gemini']);
+const SUPPORTED_LLM_PROVIDERS = new Set(['groq', 'cerebras', 'sarvam', 'gemini', 'codex']);
 
 function parseBool(value, fallback) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -90,11 +90,19 @@ function loadConfig() {
       groqApiKey: getRequired('GROQ_API_KEY'),
       cerebrasApiKey: getRequired('CEREBRAS_API_KEY'),
       geminiApiKey: getRequired('GEMINI_API_KEY') || getRequired('GOOGLE_API_KEY'),
+      deepgramApiKey: getRequired('DEEPGRAM_API_KEY'),
     },
 
     stt: {
+      provider: (process.env.STT_PROVIDER || DEFAULTS.stt.provider).trim().toLowerCase(),
       model: process.env.SARVAM_STT_MODEL || DEFAULTS.stt.model,
       languageCode: process.env.SARVAM_STT_LANGUAGE_CODE || DEFAULTS.stt.languageCode,
+      deepgramModel: process.env.DEEPGRAM_STT_MODEL || DEFAULTS.stt.deepgramModel,
+      deepgramLanguage: process.env.DEEPGRAM_STT_LANGUAGE || DEFAULTS.stt.deepgramLanguage,
+      deepgramEndpointingMs: parseNum(
+        process.env.DEEPGRAM_ENDPOINTING_MS,
+        DEFAULTS.stt.deepgramEndpointingMs
+      ),
       sampleRate: parseNum(process.env.SARVAM_STT_SAMPLE_RATE, DEFAULTS.stt.sampleRate),
       inputAudioCodec:
         process.env.SARVAM_STT_INPUT_AUDIO_CODEC || DEFAULTS.stt.inputAudioCodec,
@@ -108,6 +116,7 @@ function loadConfig() {
     },
 
     tts: {
+      provider: (process.env.TTS_PROVIDER || DEFAULTS.tts.provider).trim().toLowerCase(),
       wsUrl: process.env.SARVAM_TTS_WS_URL || DEFAULTS.tts.wsUrl,
       speaker: process.env.TTS_SPEAKER || DEFAULTS.tts.speaker,
       languageCode:
@@ -121,6 +130,12 @@ function loadConfig() {
       maxTextChars: parseNum(process.env.TTS_MAX_TEXT_CHARS, DEFAULTS.tts.maxTextChars),
       flushDelayMs: parseNum(process.env.TTS_FLUSH_DELAY_MS, DEFAULTS.tts.flushDelayMs),
       sampleRate: parseNum(process.env.TTS_SAMPLE_RATE || process.env.VOICE_TTS_SAMPLE_RATE, DEFAULTS.tts.sampleRate),
+      deepgramModel: process.env.DEEPGRAM_TTS_MODEL || DEFAULTS.tts.deepgramModel,
+      deepgramEncoding: process.env.DEEPGRAM_TTS_ENCODING || DEFAULTS.tts.deepgramEncoding,
+      deepgramSampleRate: parseNum(
+        process.env.DEEPGRAM_TTS_SAMPLE_RATE,
+        DEFAULTS.tts.deepgramSampleRate
+      ),
     },
 
     llm: {
@@ -339,6 +354,15 @@ function loadConfig() {
         DEFAULTS.gemini.systemPrompt,
     },
 
+    codex: {
+      model: process.env.CODEX_MODEL || DEFAULTS.codex.model,
+      reasoningEffort: process.env.CODEX_REASONING_EFFORT || DEFAULTS.codex.reasoningEffort,
+      systemPrompt:
+        String(process.env.CODEX_SYSTEM_PROMPT || '').trim() ||
+        resolvedSharedPrompt ||
+        DEFAULTS.codex.systemPrompt,
+    },
+
     tools: {
       enabled: parseBool(process.env.VOICE_TOOLS_ENABLED, DEFAULTS.tools.enabled),
       maxIterations: parseNum(process.env.VOICE_TOOLS_MAX_ITERATIONS, DEFAULTS.tools.maxIterations),
@@ -357,8 +381,45 @@ function loadConfig() {
   };
 }
 
+function validateStartupConfig(config) {
+  const missing = [];
+  const stt = config.stt.provider;
+  const tts = config.tts.provider;
+  const llm = config.llm.provider;
+
+  if (stt === 'deepgram' && !config.keys.deepgramApiKey) {
+    missing.push('DEEPGRAM_API_KEY (STT_PROVIDER=deepgram)');
+  }
+  if (stt === 'sarvam' && !config.keys.sarvamApiKey) {
+    missing.push('SARVAM_API_KEY or SARVAM_API_SUBSCRIPTION_KEY (STT_PROVIDER=sarvam)');
+  }
+  if (tts === 'deepgram' && !config.keys.deepgramApiKey) {
+    missing.push('DEEPGRAM_API_KEY (TTS_PROVIDER=deepgram)');
+  }
+  if (tts === 'sarvam' && !config.keys.sarvamApiKey) {
+    missing.push('SARVAM_API_KEY or SARVAM_API_SUBSCRIPTION_KEY (TTS_PROVIDER=sarvam)');
+  }
+  if (llm === 'groq' && !config.keys.groqApiKey) {
+    missing.push('GROQ_API_KEY (DEFAULT_PROVIDER=groq)');
+  }
+  if (llm === 'cerebras' && !config.keys.cerebrasApiKey) {
+    missing.push('CEREBRAS_API_KEY (DEFAULT_PROVIDER=cerebras)');
+  }
+  if (llm === 'gemini' && !config.keys.geminiApiKey) {
+    missing.push('GEMINI_API_KEY or GOOGLE_API_KEY (DEFAULT_PROVIDER=gemini)');
+  }
+  if (llm === 'sarvam' && !config.keys.sarvamApiKey) {
+    missing.push('SARVAM_API_KEY or SARVAM_API_SUBSCRIPTION_KEY (DEFAULT_PROVIDER=sarvam)');
+  }
+
+  if (missing.length) {
+    throw new Error(`Missing required API keys: ${missing.join('; ')}`);
+  }
+}
+
 module.exports = {
   loadConfig,
+  validateStartupConfig,
   parseBool,
   parseNum,
 };

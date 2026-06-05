@@ -5,8 +5,12 @@ const DEFAULTS = {
   logLevel: 'info',
 
   stt: {
+    provider: 'sarvam',
     model: 'saaras:v3',
     languageCode: 'gu-IN',
+    deepgramModel: 'nova-3',
+    deepgramLanguage: 'en',
+    deepgramEndpointingMs: 300,
     sampleRate: 16000,
     inputAudioCodec: 'pcm_s16le',
     encoding: 'audio/wav',
@@ -16,6 +20,7 @@ const DEFAULTS = {
   },
 
   tts: {
+    provider: 'sarvam',
     wsUrl: 'wss://api.sarvam.ai/text-to-speech/ws?model=bulbul:v3&send_completion_event=true',
     speaker: 'shubh',
     languageCode: 'gu-IN',
@@ -26,6 +31,9 @@ const DEFAULTS = {
     maxTextChars: 180,
     flushDelayMs: 2,
     sampleRate: 24000,
+    deepgramModel: 'aura-2-asteria-en',
+    deepgramEncoding: 'linear16',
+    deepgramSampleRate: 16000,
   },
 
   llm: {
@@ -107,6 +115,12 @@ const DEFAULTS = {
     maxCompletionTokens: 8000,
     topP: 1,
     stop: null,
+    systemPrompt: '',
+  },
+
+  codex: {
+    model: 'gpt-5.5',
+    reasoningEffort: 'low',
     systemPrompt: '',
   },
 

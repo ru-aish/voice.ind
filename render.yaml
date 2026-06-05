@@ -16,12 +16,16 @@ services:
         sync: false
       - key: DEFAULT_PROVIDER
         value: groq
+      - key: STT_PROVIDER
+        value: deepgram
+      - key: TTS_PROVIDER
+        value: deepgram
       - key: SARVAM_STT_LANGUAGE_CODE
-        value: gu-IN
+        value: en-IN
       - key: TTS_TARGET_LANGUAGE_CODE
-        value: gu-IN
-      - key: TTS_SPEAKER
-        value: shubh
+        value: en-IN
+      - key: DEEPGRAM_STT_LANGUAGE
+        value: en
       - key: VOICE_SERVER_LOG_LEVEL
         value: info
 

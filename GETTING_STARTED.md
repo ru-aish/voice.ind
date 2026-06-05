@@ -3,9 +3,14 @@
 ## 1) Use your existing env
 You already have `.env` in repo root. `voice.ai` uses the same variable names.
 
-Minimum keys:
+Minimum keys depend on providers in `.env` (see `STT_PROVIDER`, `TTS_PROVIDER`, `DEFAULT_PROVIDER`).
+
+Deepgram STT + Deepgram TTS + Groq LLM (current local default):
+- `DEEPGRAM_API_KEY`
+- `GROQ_API_KEY`
+
+Sarvam stack additionally needs:
 - `SARVAM_API_KEY` (or `SARVAM_API_SUBSCRIPTION_KEY`)
-- `GROQ_API_KEY` and/or `CEREBRAS_API_KEY`
 
 ## 2) Start server
 From repo root:
@@ -36,8 +41,8 @@ npm run voice:client -- --provider=cerebras --language=hi-IN
 ## 4) Useful runtime envs
 - `VOICE_SERVER_LOG_LEVEL=info|debug|warn|error`
 - `VOICE_SERVER_URL=ws://127.0.0.1:8081/`
-- `MIC_DEVICE=pulse`
-- `SPEAKER_DEVICE=pulse`
+- `MIC_DEVICE=auto` (picks first ALSA mic; use `plughw:1,0` to pin a device)
+- `SPEAKER_DEVICE=auto`
 - `VOICE_PIPELINE_CONTEXT_ENABLED=true`
 - `VOICE_PIPELINE_CONTEXT_MAX_TURNS=8`
 - `VOICE_PIPELINE_CONTEXT_MAX_CHARS=4000`
