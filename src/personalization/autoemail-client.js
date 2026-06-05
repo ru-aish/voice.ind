@@ -5,19 +5,33 @@ const AUTOEMAIL_BASE = String(
   process.env.AUTOEMAIL_API_BASE || 'https://sender.clarvoc.org'
 ).replace(/\/$/, '');
 
+const FETCH_TIMEOUT_MS = Math.max(
+  250,
+  Number(process.env.PERSONALIZATION_FETCH_TIMEOUT_MS || 2500)
+);
+
 async function fetchJson(url) {
   const headers = { Accept: 'application/json' };
   if (PERSONALIZATION_API_KEY) headers['X-API-Key'] = PERSONALIZATION_API_KEY;
 
-  const res = await fetch(url, { headers, cache: 'no-store' });
-  const text = await res.text();
-  let data = null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
   try {
-    data = JSON.parse(text);
+    const res = await fetch(url, { headers, cache: 'no-store', signal: controller.signal });
+    const text = await res.text();
+    let data = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+    return { ok: res.ok, status: res.status, data };
   } catch {
-    data = null;
+    return { ok: false, status: 0, data: null };
+  } finally {
+    clearTimeout(timer);
   }
-  return { ok: res.ok, status: res.status, data };
 }
 
 async function fetchByTrackingId(trackingId) {

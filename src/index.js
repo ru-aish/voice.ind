@@ -9,6 +9,12 @@ async function main() {
   const server = new VoiceWebSocketServer(config);
   const started = await server.start();
 
+  if (!config.keys.sarvamApiKey) {
+    console.warn(
+      '[voice.ai] SARVAM_API_KEY not set — STT/TTS disabled until configured (LLM/personalization still work)'
+    );
+  }
+
   console.log('[voice.ai] websocket server started');
   console.log(
     `[voice.ai] ws://0.0.0.0:${started.port}${started.path} provider_default=${config.llm.provider} stt_language=${config.stt.languageCode} log_level=${config.server.logLevel}`

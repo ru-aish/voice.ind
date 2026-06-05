@@ -14,7 +14,9 @@ class VoiceWebSocketServer {
 
   async start() {
     if (!this.config.keys.sarvamApiKey) {
-      throw new Error('Missing SARVAM_API_KEY or SARVAM_API_SUBSCRIPTION_KEY');
+      this.logger.warn(
+        'SARVAM_API_KEY not set — server will start; STT/TTS need the key when a voice session runs'
+      );
     }
 
     this.wss = await new Promise((resolve, reject) => {

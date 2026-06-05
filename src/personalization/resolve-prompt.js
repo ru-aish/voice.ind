@@ -3,33 +3,32 @@ const path = require('path');
 const { getTypeDefinition, promptsDir } = require('./registry');
 const { fetchPersonalizationRecord } = require('./autoemail-client');
 
-function readTemplate(relPath) {
+async function readTemplate(relPath) {
   const full = path.join(promptsDir, relPath);
   try {
-    return String(fs.readFileSync(full, 'utf8') || '').trim();
+    return String(await fs.promises.readFile(full, 'utf8') || '').trim();
   } catch {
     return '';
   }
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
 }
 
 function fillPlaceholders(template, record, placeholders) {
   let out = template;
   for (const [token, field] of Object.entries(placeholders)) {
     const val = record?.[field] != null ? String(record[field]) : '';
-    const patterns = [
-      new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`, 'g'),
-      new RegExp(`\\{\\{\\s*${token.replace(/_/g, '_')}\\s*\\}\\}`, 'g'),
-    ];
-    for (const re of patterns) {
-      out = out.replace(re, val);
-    }
+    const re = new RegExp(`\\{\\{\\s*${escapeRegExp(token)}\\s*\\}\\}`, 'g');
+    out = out.replace(re, val);
   }
   return out;
 }
 
 function hasRequiredFields(record, requiredFields) {
   if (!record || !Array.isArray(requiredFields)) return false;
-  return requiredFields.every((f) => String(record[f] || '').trim());
+  return requiredFields.every((f) => String(record[f] ?? '').trim());
 }
 
 /**
@@ -82,7 +81,7 @@ async function resolvePersonalizationPrompt({ trackingId, campaignId }) {
     };
   }
 
-  const template = readTemplate(def.templateFile);
+  const template = await readTemplate(def.templateFile);
   if (!template) {
     return {
       applied: false,
@@ -105,6 +104,7 @@ async function resolvePersonalizationPrompt({ trackingId, campaignId }) {
 
 module.exports = {
   resolvePersonalizationPrompt,
+  readTemplate,
   fillPlaceholders,
   hasRequiredFields,
 };

@@ -240,6 +240,7 @@ class VoicePipeline extends EventEmitter {
     this.sessionTrackingId = null;
     this.sessionCampaignId = null;
     this.personalizationMeta = null;
+    this.personalizationSystemPrompt = null;
     this.pendingTtsLanguageFallbackMetric = null;
 
     this.activeProvider = config.llm.provider;
@@ -691,7 +692,6 @@ class VoicePipeline extends EventEmitter {
       next.trackingId || next.tracking_id || next.tid || this.sessionTrackingId || null;
     const campaignId =
       next.campaignId || next.campaign_id || next.cid || this.sessionCampaignId || null;
-
     if (trackingId) this.sessionTrackingId = String(trackingId).trim();
     if (campaignId) this.sessionCampaignId = String(campaignId).trim();
 
@@ -704,20 +704,19 @@ class VoicePipeline extends EventEmitter {
         this.personalizationMeta = resolved;
         personalizationType = resolved.type;
         if (resolved.applied && resolved.systemPrompt) {
-          const promptText = String(resolved.systemPrompt).trim();
-          this.config.groq.systemPrompt = promptText;
-          this.config.cerebras.systemPrompt = promptText;
-          this.config.sarvam.systemPrompt = promptText;
-          this.config.gemini.systemPrompt = promptText;
+          this.personalizationSystemPrompt = String(resolved.systemPrompt).trim();
           personalizationApplied = true;
+          this.providers.clear();
+        } else {
+          this.personalizationSystemPrompt = null;
         }
         this.emit('metrics', {
           type: 'personalization_resolve',
           applied: resolved.applied,
           personalizationType: resolved.type,
           reason: resolved.reason,
-          trackingId: this.sessionTrackingId || null,
-          campaignId: this.sessionCampaignId || null,
+          trackingIdPresent: Boolean(this.sessionTrackingId),
+          campaignIdPresent: Boolean(this.sessionCampaignId),
         });
       } catch (err) {
         this.emit('metrics', {
@@ -902,6 +901,11 @@ class VoicePipeline extends EventEmitter {
     }
 
     const connectPromise = (async () => {
+      if (!this.config.keys.sarvamApiKey) {
+        throw new Error(
+          'Sarvam STT unavailable: set SARVAM_API_KEY or SARVAM_API_SUBSCRIPTION_KEY'
+        );
+      }
       const sttClient = new SarvamSttClient({
         apiKey: this.config.keys.sarvamApiKey,
         model: this.config.stt.model,
@@ -992,6 +996,11 @@ class VoicePipeline extends EventEmitter {
   }
 
   async #ensureTtsClient() {
+    if (!this.config.keys.sarvamApiKey) {
+      throw new Error(
+        'Sarvam TTS unavailable: set SARVAM_API_KEY or SARVAM_API_SUBSCRIPTION_KEY'
+      );
+    }
     if (!this.ttsClient || this.ttsClient.aborted) {
       this.ttsClient = new SarvamTtsClient({
         apiKey: this.config.keys.sarvamApiKey,
@@ -1295,15 +1304,17 @@ class VoicePipeline extends EventEmitter {
   #buildContextMessages(prompt) {
     const messages = [];
     const providerName = this.activeProvider;
-    let baseSystemPrompt;
-    if (providerName === 'cerebras') {
-      baseSystemPrompt = this.config.cerebras.systemPrompt;
-    } else if (providerName === 'sarvam') {
-      baseSystemPrompt = this.config.sarvam.systemPrompt;
-    } else if (providerName === 'gemini') {
-      baseSystemPrompt = this.config.gemini.systemPrompt;
-    } else {
-      baseSystemPrompt = this.config.groq.systemPrompt;
+    let baseSystemPrompt = this.personalizationSystemPrompt;
+    if (!baseSystemPrompt) {
+      if (providerName === 'cerebras') {
+        baseSystemPrompt = this.config.cerebras.systemPrompt;
+      } else if (providerName === 'sarvam') {
+        baseSystemPrompt = this.config.sarvam.systemPrompt;
+      } else if (providerName === 'gemini') {
+        baseSystemPrompt = this.config.gemini.systemPrompt;
+      } else {
+        baseSystemPrompt = this.config.groq.systemPrompt;
+      }
     }
     const languageInstruction = buildLanguageConstraintInstruction(this.config.tts.languageCode);
 
