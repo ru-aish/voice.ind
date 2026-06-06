@@ -6,7 +6,7 @@ const DEFAULTS = {
 
   stt: {
     model: 'saaras:v3',
-    languageCode: 'gu-IN',
+    languageCode: 'en-IN',
     sampleRate: 16000,
     inputAudioCodec: 'pcm_s16le',
     encoding: 'audio/wav',
@@ -17,12 +17,12 @@ const DEFAULTS = {
 
   tts: {
     wsUrl: 'wss://api.sarvam.ai/text-to-speech/ws?model=bulbul:v3&send_completion_event=true',
-    speaker: 'shubh',
-    languageCode: 'gu-IN',
+    speaker: 'amelia',
+    languageCode: 'en-IN',
     pace: 1.0,
     minBufferSize: 30,
     maxChunkLength: 50,
-    outputCodec: 'wav',
+    outputCodec: 'linear16',
     maxTextChars: 180,
     flushDelayMs: 2,
     sampleRate: 24000,
@@ -66,7 +66,7 @@ const DEFAULTS = {
   },
 
   bridge: {
-    flushTimeoutMs: 120,
+    flushTimeoutMs: 180,
   },
 
   groq: {

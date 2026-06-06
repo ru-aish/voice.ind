@@ -323,6 +323,8 @@ class VoicePipeline extends EventEmitter {
       sttLanguage: this.config.stt.languageCode,
       sttConnected: Boolean(this.sttClient?.connected),
       ttsLanguage: this.config.tts.languageCode,
+      ttsSampleRate: this.config.tts.sampleRate,
+      ttsOutputCodec: this.config.tts.outputCodec,
       sampleRate: this.config.stt.sampleRate,
     });
   }
@@ -471,6 +473,24 @@ class VoicePipeline extends EventEmitter {
     if (next.speaker && String(next.speaker).trim()) {
       this.config.tts.speaker = String(next.speaker).trim();
       resetTts = true;
+    }
+
+    const validTtsOutputCodecs = new Set([
+      'linear16',
+      'wav',
+      'mp3',
+      'opus',
+      'flac',
+      'aac',
+      'mulaw',
+      'alaw',
+    ]);
+    if (next.ttsOutputCodec && String(next.ttsOutputCodec).trim()) {
+      const codec = String(next.ttsOutputCodec).trim().toLowerCase();
+      if (validTtsOutputCodecs.has(codec) && this.config.tts.outputCodec !== codec) {
+        this.config.tts.outputCodec = codec;
+        resetTts = true;
+      }
     }
 
     if (next.systemPrompt) {
@@ -661,15 +681,6 @@ class VoicePipeline extends EventEmitter {
       this.sessionGreeting = String(next.greeting).trim();
     }
 
-    if (restartStt) {
-      await this.#connectSttClient(true);
-    }
-
-    if (resetTts && this.ttsClient) {
-      await this.ttsClient.close();
-      this.ttsClient = null;
-    }
-
     if (next.clearContext === true) {
       this.#clearContext();
     }
@@ -718,12 +729,41 @@ class VoicePipeline extends EventEmitter {
           trackingIdPresent: Boolean(this.sessionTrackingId),
           campaignIdPresent: Boolean(this.sessionCampaignId),
         });
+
+        if (resolved.applied && resolved.type === 'realestate1') {
+          const englishLang = 'en-IN';
+          if (this.config.stt.languageCode !== englishLang) {
+            this.config.stt.languageCode = englishLang;
+            restartStt = true;
+          }
+          if (this.config.tts.languageCode !== englishLang) {
+            this.config.tts.languageCode = englishLang;
+            resetTts = true;
+          }
+          if (this.config.tts.speaker !== 'amelia') {
+            this.config.tts.speaker = 'amelia';
+            resetTts = true;
+          }
+          if (this.activeProvider !== 'groq' && !this.config.llm.providerLocked) {
+            this.activeProvider = 'groq';
+            llmConfigChanged = true;
+          }
+        }
       } catch (err) {
         this.emit('metrics', {
           type: 'personalization_resolve_error',
           error: err?.message || String(err),
         });
       }
+    }
+
+    if (restartStt) {
+      await this.#connectSttClient(true);
+    }
+
+    if (resetTts && this.ttsClient) {
+      await this.ttsClient.close();
+      this.ttsClient = null;
     }
 
     return {
@@ -737,6 +777,8 @@ class VoicePipeline extends EventEmitter {
       sttSampleRate: this.config.stt.sampleRate,
       sttInputAudioCodec: this.config.stt.inputAudioCodec,
       ttsLanguage: this.config.tts.languageCode,
+      ttsSampleRate: this.config.tts.sampleRate,
+      ttsOutputCodec: this.config.tts.outputCodec,
       sttModel: this.config.stt.model,
       ttsSpeaker: this.config.tts.speaker,
       groqModel: this.config.groq.model,
