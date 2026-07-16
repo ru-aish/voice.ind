@@ -303,7 +303,7 @@ export default function VersionFive() {
             <section id="problem" data-animate data-track-view="v5_view_problem" className={`${styles.problem} ${isVisible['problem'] ? styles.visible : ''}`}>
                 <div className={styles.sectionHeader}>
                     <h2>The Hidden Cost of <span className={styles.highlightRed}>Slow Lead Response</span></h2>
-                    <p>Every unanswered property inquiry can become another agent's conversation</p>
+                    <p>Every unanswered property inquiry can become another agent&apos;s conversation</p>
                 </div>
 
                 <div className={styles.problemColumns}>
