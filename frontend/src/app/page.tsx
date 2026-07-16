@@ -11,24 +11,24 @@ const WORKING_DAYS_PER_YEAR = 260;
 // Static data - moved outside component for performance
 const TESTIMONIALS = [
     {
-        name: "Rajesh Mehta",
-        role: "CEO, TechScale Solutions",
-        quote: "We were losing 40% of leads because nobody picked up calls after hours. Ab har call attend hoti hai, and bookings are up 67%. Total game changer for our business.",
-        metric: "67% more conversions",
+        name: "After-Hours Buyer Inquiry",
+        role: "Illustrative listing workflow",
+        quote: "A buyer asks about a property after hours, receives approved listing details, and submits a showing request for the agent to confirm.",
+        metric: "Faster lead response",
         image: "/images/testimonials/michael.png"
     },
     {
-        name: "Priya Sharma",
-        role: "Operations Head, GrowthBox",
-        quote: "The AI handles inquiries, schedules demos, and follows up — sab kuch automatic. Our team now focuses only on closing deals instead of answering phones all day.",
-        metric: "₹8L saved monthly",
+        name: "Repetitive Listing Questions",
+        role: "Illustrative team workflow",
+        quote: "The assistant answers approved questions about price, layout, amenities, and availability before routing a qualified conversation to the team.",
+        metric: "Less admin work",
         image: "/images/testimonials/sarah.png"
     },
     {
-        name: "Amit Verma",
-        role: "Founder, QuickServ India",
-        quote: "Customer complaints about wait times dropped 90%. The AI picks up instantly and resolves queries faster than any receptionist we ever hired. Best investment this year.",
-        metric: "90% faster response",
+        name: "High-Intent Buyer Routing",
+        role: "Illustrative lead workflow",
+        quote: "A pre-approved buyer requesting an immediate tour is identified as high intent and sent to the listing agent with the relevant context.",
+        metric: "24/7 buyer response",
         image: "/images/testimonials/james.png"
     }
 ];
@@ -42,8 +42,8 @@ const FEATURES = [
                 <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
             </svg>
         ),
-        title: "Smart Appointment Booking",
-        description: "Customers book, reschedule, or cancel 24/7. Real-time calendar sync with your existing tools — no double bookings, ever."
+        title: "Showing Request Coordination",
+        description: "Buyers can request, reschedule, or cancel property showings 24/7, with availability synchronized to your existing calendar."
     },
     {
         icon: (
@@ -52,8 +52,8 @@ const FEATURES = [
                 <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
             </svg>
         ),
-        title: "Instant Query Resolution",
-        description: "Answers FAQs about your services, pricing, hours, and availability — no human needed. Customers get instant help."
+        title: "Listing-Specific Answers",
+        description: "Answers questions about price, layout, amenities, location, availability, and listing details using information you approve."
     },
     {
         icon: (
@@ -65,7 +65,7 @@ const FEATURES = [
             </svg>
         ),
         title: "Lead Capture & Qualification",
-        description: "Captures caller details, qualifies leads based on your criteria, and sends them straight to your CRM automatically."
+        description: "Captures buyer details, timeline, financing status, and property interest, then routes qualified leads to your team or CRM."
     },
     {
         icon: (
@@ -75,7 +75,7 @@ const FEATURES = [
             </svg>
         ),
         title: "Automated Follow-ups",
-        description: "Sends reminders, confirmation messages, and follow-up calls automatically. Reduces no-shows and keeps customers engaged."
+        description: "Sends showing confirmations and reminders automatically, reducing no-shows and keeping interested buyers engaged."
     },
     {
         icon: (
@@ -85,7 +85,7 @@ const FEATURES = [
             </svg>
         ),
         title: "Natural Voice Conversations",
-        description: "Sounds 100% human. Callers can't tell it's AI — warm, natural, and adapts to conversation flow in real-time."
+        description: "Provides warm, natural voice conversations and adapts in real time while staying within your approved listing information."
     },
     {
         icon: (
@@ -95,7 +95,7 @@ const FEATURES = [
             </svg>
         ),
         title: "Reschedule & Cancel",
-        description: "Customers manage their own appointments easily, freeing your staff for high-value work that actually needs a human."
+        description: "Buyers manage showing times without back-and-forth, freeing agents for negotiations, tours, and client relationships."
     },
     {
         icon: (
@@ -105,8 +105,8 @@ const FEATURES = [
                 <path d="M12 8h.01" />
             </svg>
         ),
-        title: "Business Information",
-        description: "Answers questions about services, locations, hours, directions, and what to expect — like your best receptionist, but 24/7."
+        title: "Property & Brokerage Information",
+        description: "Answers questions about properties, neighborhoods, brokerage hours, directions, and next steps, 24 hours a day."
     },
     {
         icon: (
@@ -117,38 +117,38 @@ const FEATURES = [
             </svg>
         ),
         title: "Smart Call Routing",
-        description: "Identifies urgent situations and routes them to the right person instantly. No important call ever gets lost."
+        description: "Identifies serious buyers, urgent seller requests, and time-sensitive inquiries, then routes them to the right agent instantly."
     }
 ];
 
 const FAQS = [
     {
         question: "How natural does the AI voice sound?",
-        answer: "Our AI uses state-of-the-art voice synthesis tuned for natural conversation. In blind tests, 92% of callers couldn't tell they were speaking with an AI. The voice is warm, professional, and adapts its pace based on the caller's needs — Hindi, English, or Hinglish."
+        answer: "Our voice assistant is tuned for natural, professional conversations and can follow the pace of a buyer inquiry while staying within your approved listing information."
     },
     {
-        question: "Can it handle complex scheduling with multiple team members?",
-        answer: "Bilkul. The AI integrates with your calendar to see real-time availability across all team members. It can match customers with specific people, handle recurring appointments, and respect your scheduling rules — sab automatically."
+        question: "Can it coordinate showings across multiple agents?",
+        answer: "Yes. The assistant can use real-time availability across agents, respect listing-specific showing rules, and route each request to the correct person."
     },
     {
-        question: "What happens if a caller has an urgent issue?",
-        answer: "The AI recognizes urgent situations and follows your defined escalation protocols. It can immediately transfer to on-call staff, take detailed messages for urgent callback, or provide emergency instructions as you configure."
+        question: "What happens when a buyer is ready to act?",
+        answer: "The assistant recognizes high-intent signals such as financing readiness or an immediate showing request and follows your escalation rules to notify or transfer the lead to an agent."
     },
     {
-        question: "Kya yeh Hindi mein baat kar sakta hai?",
-        answer: "Haan, bilkul! Our AI supports Hindi, English, and Hinglish conversations naturally. It detects the caller's language preference and switches seamlessly — no awkward transitions."
+        question: "Can it answer questions about a specific listing?",
+        answer: "Yes. Each assistant can be configured with approved details for a specific property, including price, features, availability, neighborhood context, and showing instructions."
     },
     {
         question: "Will it integrate with our existing systems?",
-        answer: "We integrate with all major CRMs, calendar systems, and business tools — Zoho, Google Workspace, HubSpot, and more. Setup is seamless and bi-directional, so changes made anywhere are reflected everywhere."
+        answer: "The assistant can connect with common calendars, CRMs, lead-routing tools, and brokerage workflows. Integration scope is confirmed during setup."
     },
     {
         question: "How long does setup take?",
-        answer: "Most businesses are fully operational within 2-3 hours. We handle the technical integration, train the AI on your specific services and policies, and provide a dedicated success manager for the first 30 days."
+        answer: "A listing demo can be prepared quickly. Production setup depends on your listings, calendar, routing rules, and CRM requirements."
     },
     {
         question: "Can we customize the AI's responses?",
-        answer: "Absolutely. You control the greeting, personality, and specific responses for your business. Want the AI to mention your specialties, promote new offers, or follow specific scripts? It's all customizable through our dashboard."
+        answer: "Yes. You control the greeting, tone, approved property facts, qualification questions, escalation rules, and what the assistant must never claim."
     }
 ];
 
@@ -209,7 +209,7 @@ export default function VersionFive() {
                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
                     </svg>
-                    <span>ElevixAI</span>
+                    <span>Clarvoc</span>
                 </div>
                 <div className={styles.navRight}>
                     <div className={styles.secureBadge}>
@@ -217,7 +217,7 @@ export default function VersionFive() {
                             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                             <path d="M9 12l2 2 4-4" />
                         </svg>
-                        Enterprise Secure
+                        Built for Real Estate
                     </div>
                 </div>
             </nav>
@@ -225,10 +225,10 @@ export default function VersionFive() {
             {/* Hero Section */}
             <section className={styles.hero} data-track-view="v5_view_hero">
                 <div className={styles.heroContent}>
-                    <div className={styles.badge}>AI-Powered Voice Agent</div>
+                    <div className={styles.badge}>AI Voice & Chat for Real Estate</div>
                     <h1 className={styles.heroTitle}>
-                        Stop Losing <span className={styles.highlight}>₹50,000+</span> <br />
-                        Every Month to Missed Calls
+                        Turn Every <span className={styles.highlight}>Listing Inquiry</span> <br />
+                        Into a Qualified Conversation
                     </h1>
 
                     {/* Key Benefits Bullets */}
@@ -237,25 +237,25 @@ export default function VersionFive() {
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                                 <path d="M9 12l2 2 4-4" />
                             </svg>
-                            <span>Sounds 100% Human — Bilkul Real Lagta Hai</span>
+                            <span>Answers Property Questions Instantly</span>
                         </div>
                         <div className={styles.bulletItem}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                                 <path d="M9 12l2 2 4-4" />
                             </svg>
-                            <span>Books Appointments Instantly — 24/7</span>
+                            <span>Coordinates Showing Requests — 24/7</span>
                         </div>
                         <div className={styles.bulletItem}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                                 <path d="M9 12l2 2 4-4" />
                             </svg>
-                            <span>48-Hour Setup — Hum Sab Karenge</span>
+                            <span>Configured Around Your Listings</span>
                         </div>
                         <div className={styles.bulletItem}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                                 <path d="M9 12l2 2 4-4" />
                             </svg>
-                            <span>No Lock-in, Cancel Anytime</span>
+                            <span>Escalates Serious Buyers to Your Team</span>
                         </div>
                     </div>
 
@@ -293,7 +293,7 @@ export default function VersionFive() {
                                 <span className={styles.liveDot}></span>
                                 LIVE
                             </div>
-                            <p>&quot;Hi, I want to book an appointment for tomorrow...&quot;</p>
+                            <p>&quot;Is the West Street property still available for a showing?&quot;</p>
                         </div>
                     </div>
                 </div>
@@ -302,8 +302,8 @@ export default function VersionFive() {
             {/* Problem Section - Two Column Layout */}
             <section id="problem" data-animate data-track-view="v5_view_problem" className={`${styles.problem} ${isVisible['problem'] ? styles.visible : ''}`}>
                 <div className={styles.sectionHeader}>
-                    <h2>The Hidden Cost of <span className={styles.highlightRed}>Missed Calls</span></h2>
-                    <p>Har ek missed call = ek customer jo competitor ke paas gaya</p>
+                    <h2>The Hidden Cost of <span className={styles.highlightRed}>Slow Lead Response</span></h2>
+                    <p>Every unanswered property inquiry can become another agent's conversation</p>
                 </div>
 
                 <div className={styles.problemColumns}>
@@ -320,7 +320,7 @@ export default function VersionFive() {
                                 </div>
                                 <div className={styles.chaosContent}>
                                     <span className={styles.chaosTime}>9:30 AM</span>
-                                    <p>Customer calls during a meeting <span className={styles.chaosRed}>(voicemail)</span></p>
+                                    <p>A buyer asks about a listing while you are in a showing <span className={styles.chaosRed}>(unanswered)</span></p>
                                 </div>
                             </div>
 
@@ -335,7 +335,7 @@ export default function VersionFive() {
                                 </div>
                                 <div className={styles.chaosContent}>
                                     <span className={styles.chaosTime}>10:15 AM</span>
-                                    <p>Customer needs urgent help — ready to pay</p>
+                                    <p>The buyer wants details and is ready to schedule a tour</p>
                                 </div>
                             </div>
 
@@ -350,7 +350,7 @@ export default function VersionFive() {
                                 </div>
                                 <div className={styles.chaosContent}>
                                     <span className={styles.chaosTime}>1:00 PM</span>
-                                    <p>You finally check missed calls during lunch</p>
+                                    <p>You return to the inquiry hours later</p>
                                 </div>
                             </div>
 
@@ -365,7 +365,7 @@ export default function VersionFive() {
                                 </div>
                                 <div className={styles.chaosContent}>
                                     <span className={styles.chaosTime}>1:30 PM</span>
-                                    <p>Call back — <span className={styles.chaosRed}>already went to competitor</span></p>
+                                    <p>Follow up — <span className={styles.chaosRed}>the buyer has contacted another agent</span></p>
                                 </div>
                             </div>
 
@@ -380,7 +380,7 @@ export default function VersionFive() {
                                 </div>
                                 <div className={styles.chaosContent}>
                                     <span className={styles.chaosTime}>Result</span>
-                                    <p className={styles.chaosLossText}>-₹50,000+ lifetime customer value lost</p>
+                                    <p className={styles.chaosLossText}>A qualified buyer conversation is lost</p>
                                 </div>
                             </div>
                         </div>
@@ -391,16 +391,16 @@ export default function VersionFive() {
 
                             {[
                                 {
-                                    title: "Empty Calendar Slots",
-                                    content: "Missed calls mean empty time slots. With average deal values of ₹5,000-50,000, just 2 missed opportunities per day costs your business over ₹25 lakhs annually in lost revenue."
+                                    title: "Lost Showing Opportunities",
+                                    content: "Slow replies reduce the chance of securing the first conversation and the showing. The value is not the call itself, but the buyer relationship and transaction opportunity behind it."
                                 },
                                 {
-                                    title: "Customers Go to Competitors",
-                                    content: "When customers can't reach you, they call the next business. 85% of callers won't leave a voicemail — they simply move on to someone who picks up."
+                                    title: "Buyers Contact Other Agents",
+                                    content: "Property shoppers often contact several agents at once. The first useful response is more likely to earn the showing and continue the relationship."
                                 },
                                 {
-                                    title: "Team Burnout & Turnover",
-                                    content: "Your team shouldn't be answering phones all day. Juggling core work and phone calls leads to burnout, mistakes, and high turnover costs averaging ₹1.5L per employee."
+                                    title: "Repetitive Agent Work",
+                                    content: "Agents repeatedly answer the same questions about price, availability, amenities, and showing times instead of focusing on qualified clients and transactions."
                                 }
                             ].map((item, index) => (
                                 <div key={index} className={styles.chainItem}>
@@ -430,12 +430,12 @@ export default function VersionFive() {
                         <h3 className={styles.columnTitle}>The Cost</h3>
 
                         <div className={styles.calculator}>
-                            <h4 className={styles.calcTitle}>Your Business&apos;s Lost Revenue</h4>
+                            <h4 className={styles.calcTitle}>Inquiry Value Requiring Fast Follow-Up</h4>
 
                             <div className={styles.calcSliders}>
                                 <div className={styles.calcSliderGroup}>
                                     <div className={styles.calcSliderHeader}>
-                                        <label>Customer calls per day</label>
+                                        <label>Listing inquiries per day</label>
                                         <span className={styles.calcValue}>{calcValues.callsPerDay}</span>
                                     </div>
                                     <input
@@ -456,8 +456,8 @@ export default function VersionFive() {
 
                                 <div className={styles.calcSliderGroup}>
                                     <div className={styles.calcSliderHeader}>
-                                        <label>Average deal value</label>
-                                        <span className={styles.calcValue}>₹{calcValues.dealValue.toLocaleString('en-IN')}</span>
+                                        <label>Average commission opportunity</label>
+                                        <span className={styles.calcValue}>${calcValues.dealValue.toLocaleString('en-US')}</span>
                                     </div>
                                     <input
                                         type="range"
@@ -471,14 +471,14 @@ export default function VersionFive() {
                                         className={styles.calcSlider}
                                     />
                                     <div className={styles.calcSliderLabels}>
-                                        <span>₹500</span>
-                                        <span>₹50,000</span>
+                                        <span>$500</span>
+                                        <span>$50,000</span>
                                     </div>
                                 </div>
 
                                 <div className={styles.calcSliderGroup}>
                                     <div className={styles.calcSliderHeader}>
-                                        <label>Missed call rate</label>
+                                        <label>Delayed or missed inquiry rate</label>
                                         <span className={styles.calcValue}>{calcValues.missRate}%</span>
                                     </div>
                                     <input
@@ -500,14 +500,14 @@ export default function VersionFive() {
 
                             <div className={styles.calcResult}>
                                 <div className={styles.calcResultAmount}>
-                                    ₹{(calcValues.callsPerDay * calcValues.dealValue * (calcValues.missRate / 100) * WORKING_DAYS_PER_YEAR).toLocaleString('en-IN')}
+                                    ${(calcValues.callsPerDay * calcValues.dealValue * (calcValues.missRate / 100) * WORKING_DAYS_PER_YEAR).toLocaleString('en-US')}
                                     <span>/year</span>
                                 </div>
-                                <p className={styles.calcResultLabel}>Lost revenue from missed customer calls</p>
+                                <p className={styles.calcResultLabel}>Maximum commission opportunity represented by delayed listing inquiries, not guaranteed lost revenue</p>
                             </div>
 
                             <div className={styles.hiddenCosts}>
-                                <h5>Additional Business Costs</h5>
+                                <h5>Additional Brokerage Costs</h5>
                                 <div className={styles.hiddenCostsGrid}>
                                     <div className={styles.hiddenCostItem}>
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -515,24 +515,24 @@ export default function VersionFive() {
                                             <circle cx="9" cy="7" r="4" />
                                             <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
                                         </svg>
-                                        <span className={styles.hiddenCostName}>Receptionist</span>
-                                        <span className={styles.hiddenCostValue}>₹3.5L</span>
+                                        <span className={styles.hiddenCostName}>Manual Inquiry Handling</span>
+                                        <span className={styles.hiddenCostValue}>Time</span>
                                     </div>
                                     <div className={styles.hiddenCostItem}>
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <rect x="3" y="4" width="18" height="18" rx="2" />
                                             <path d="M16 2v4M8 2v4M3 10h18" />
                                         </svg>
-                                        <span className={styles.hiddenCostName}>No-Shows</span>
-                                        <span className={styles.hiddenCostValue}>₹2L</span>
+                                        <span className={styles.hiddenCostName}>Showing No-Shows</span>
+                                        <span className={styles.hiddenCostValue}>Leads</span>
                                     </div>
                                     <div className={styles.hiddenCostItem}>
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <circle cx="12" cy="12" r="10" />
                                             <polyline points="12 6 12 12 16 14" />
                                         </svg>
-                                        <span className={styles.hiddenCostName}>After-Hours</span>
-                                        <span className={styles.hiddenCostValue}>₹4L</span>
+                                        <span className={styles.hiddenCostName}>After-Hours Leads</span>
+                                        <span className={styles.hiddenCostValue}>Coverage</span>
                                     </div>
                                 </div>
                             </div>
@@ -547,11 +547,11 @@ export default function VersionFive() {
                     <div className={styles.solutionText}>
                         <div className={styles.solutionBadge}>The Solution</div>
                         <h2 className={styles.solutionTitle}>
-                            Your <span className={styles.highlight}>24/7 AI Receptionist</span> That Never Misses a Call
+                            Your <span className={styles.highlight}>24/7 AI Listing Assistant</span> That Never Misses an Inquiry
                         </h2>
                         <p className={styles.solutionDescription}>
-                            Our AI answers every call instantly, handles bookings, resolves queries, and captures leads —
-                            all while sounding indistinguishable from your best team member.
+                            Clarvoc answers listing questions, captures buyer intent, and coordinates showing requests —
+                            then hands qualified conversations to your team.
                         </p>
 
                         <div className={styles.capabilityList}>
@@ -574,8 +574,8 @@ export default function VersionFive() {
                                     </svg>
                                 </div>
                                 <div>
-                                    <h4>Real-Time Calendar Sync</h4>
-                                    <p>Books directly into your existing systems</p>
+                                    <h4>Showing Calendar Sync</h4>
+                                    <p>Coordinates requests using your existing availability</p>
                                 </div>
                             </div>
                             <div className={styles.capabilityItem}>
@@ -587,7 +587,7 @@ export default function VersionFive() {
                                 </div>
                                 <div>
                                     <h4>24/7 Availability</h4>
-                                    <p>Capture night &amp; weekend calls automatically</p>
+                                    <p>Capture evening and weekend property inquiries automatically</p>
                                 </div>
                             </div>
                         </div>
@@ -615,15 +615,15 @@ export default function VersionFive() {
                                         </svg>
                                     </div>
                                     <div className={styles.messageBubble}>
-                                        <p>&quot;Hi, I need to book an appointment for tomorrow. Do you have any slots available?&quot;</p>
-                                        <span className={styles.messageTime}>Customer</span>
+                                        <p>&quot;Hi, is the West Street listing still available, and could I see it tomorrow?&quot;</p>
+                                        <span className={styles.messageTime}>Buyer</span>
                                     </div>
                                 </div>
 
                                 <div className={styles.messageOutgoing}>
                                     <div className={styles.messageBubble}>
-                                        <p>&quot;Of course! I have openings tomorrow at 11 AM and 3 PM. Which time works better for you?&quot;</p>
-                                        <span className={styles.messageTime}>AI Receptionist &middot; 380ms</span>
+                                        <p>&quot;Yes, it is active. The property has four bedrooms and four bathrooms. I can help request a showing at 11 AM or 3 PM tomorrow. Which works better?&quot;</p>
+                                        <span className={styles.messageTime}>AI Listing Assistant &middot; 380ms</span>
                                     </div>
                                     <div className={styles.messageAvatarAI}>
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -640,15 +640,15 @@ export default function VersionFive() {
                                         </svg>
                                     </div>
                                     <div className={styles.messageBubble}>
-                                        <p>&quot;3 PM works. What are your charges for consultation?&quot;</p>
-                                        <span className={styles.messageTime}>Customer</span>
+                                        <p>&quot;3 PM works. I am pre-approved and would like to tour it.&quot;</p>
+                                        <span className={styles.messageTime}>Buyer</span>
                                     </div>
                                 </div>
 
                                 <div className={styles.messageOutgoing}>
                                     <div className={styles.messageBubble}>
-                                        <p>&quot;Great choice! I&apos;ve booked you for 3 PM tomorrow. You&apos;ll receive a confirmation SMS shortly with all the details. Anything else I can help with?&quot;</p>
-                                        <span className={styles.messageTime}>AI Receptionist &middot; 420ms</span>
+                                        <p>&quot;Thanks. I have captured your request and financing status. The listing agent will confirm the 3 PM showing with you shortly.&quot;</p>
+                                        <span className={styles.messageTime}>AI Listing Assistant &middot; 420ms</span>
                                     </div>
                                     <div className={styles.messageAvatarAI}>
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -665,7 +665,7 @@ export default function VersionFive() {
                                         <circle cx="12" cy="12" r="10" />
                                     </svg>
                                 </div>
-                                <span>Booked &middot; SMS Sent &middot; Calendar Updated</span>
+                                <span>Buyer Qualified &middot; Showing Requested &middot; Agent Notified</span>
                             </div>
                         </div>
                     </div>
@@ -675,8 +675,8 @@ export default function VersionFive() {
             {/* Features Section */}
             <section id="features" data-animate data-track-view="v5_view_features" className={`${styles.features} ${isVisible['features'] ? styles.visible : ''}`}>
                 <div className={styles.sectionHeader}>
-                    <h2>Everything Your Receptionist Does, <span className={styles.highlight}>Automated</span></h2>
-                    <p>Comprehensive call handling built for every business</p>
+                    <h2>Everything Your Listing Inquiry Workflow Needs, <span className={styles.highlight}>Automated</span></h2>
+                    <p>Property-specific voice and chat assistance built for real-estate teams</p>
                 </div>
 
                 <div className={styles.featureGrid}>
@@ -695,8 +695,8 @@ export default function VersionFive() {
             {/* Testimonials Section */}
             <section id="testimonials" data-animate data-track-view="v5_view_testimonials" className={`${styles.testimonials} ${isVisible['testimonials'] ? styles.visible : ''}`}>
                 <div className={styles.sectionHeader}>
-                    <h2>Trusted by <span className={styles.highlight}>Businesses</span> Across India</h2>
-                    <p>Real results from real businesses — seedha numbers</p>
+                    <h2>Real-Estate <span className={styles.highlight}>Workflow Examples</span></h2>
+                    <p>Illustrative scenarios showing how listing inquiries move through the system</p>
                 </div>
 
                 <div className={styles.testimonialGrid}>
@@ -728,7 +728,7 @@ export default function VersionFive() {
             <section id="faq" data-animate data-track-view="v5_view_faq" className={`${styles.faq} ${isVisible['faq'] ? styles.visible : ''}`}>
                 <div className={styles.sectionHeader}>
                     <h2>Frequently Asked <span className={styles.highlight}>Questions</span></h2>
-                    <p>Sab kuch jaaniye ElevixAI ke baare mein</p>
+                    <p>How Clarvoc fits into a real-estate inquiry workflow</p>
                 </div>
 
                 <div className={styles.faqContainer}>
@@ -758,28 +758,28 @@ export default function VersionFive() {
             {/* Final CTA */}
             <section className={styles.finalCTA}>
                 <div className={styles.ctaContent}>
-                    <h2>Ready to Try? <span className={styles.highlight}>Abhi Baat Karo</span></h2>
-                    <p>Experience firsthand how our AI handles conversations — ask anything.</p>
+                    <h2>See a Listing Assistant <span className={styles.highlight}>Handle a Buyer Inquiry</span></h2>
+                    <p>Open the live demo and ask questions about a sample property.</p>
                     <div className={styles.ctaButtons}>
                         <a href="/demo" className={styles.btnPrimary} data-track="v5_cta_demo">
-                            Talk to AI Now
+                            Try the Listing Demo
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
                                 <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                                 <path d="M12 19v3" />
                             </svg>
                         </a>
-                        <a href="mailto:query@elevix.site" className={styles.btnSecondary} data-track="v5_cta_contact">
+                        <a href="mailto:rudra@clarvoc.org" className={styles.btnSecondary} data-track="v5_cta_contact">
                             Contact Us
                         </a>
                     </div>
-                    <p className={styles.ctaNote}>No signup required. Seedha baat karo.</p>
+                    <p className={styles.ctaNote}>No signup required. Open the demo and start a conversation.</p>
                 </div>
             </section>
 
             {/* Footer */}
             <footer className={styles.footer}>
-                <p>&copy; 2026 ElevixAI. All rights reserved.</p>
+                <p>&copy; 2026 Clarvoc. All rights reserved.</p>
             </footer>
         </div>
     );

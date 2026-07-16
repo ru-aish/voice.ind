@@ -3,8 +3,8 @@ import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Voice AI",
-  description: "Real-time voice agent powered by Gemini Live API",
+  title: "Clarvoc - AI Listing Assistant for Real Estate",
+  description: "Property-specific voice and chat assistance for buyer questions, lead qualification, and showing coordination.",
   icons: {
     icon: "/favicon.ico",
   },
